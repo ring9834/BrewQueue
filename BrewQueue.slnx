@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/BrewQueue.Contracts/BrewQueue.Contracts.csproj" />
+    <Project Path="src/BrewQueue.Domain/BrewQueue.Domain.csproj" />
+    <Project Path="src/BrewQueue.Infrastructure/BrewQueue.Infrastructure.csproj" />
+    <Project Path="src/BrewQueue.Api/BrewQueue.Api.csproj" />
+    <Project Path="src/BrewQueue.KitchenWorker/BrewQueue.KitchenWorker.csproj" />
+    <Project Path="src/BrewQueue.StatsWorker/BrewQueue.StatsWorker.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/BrewQueue.UnitTests/BrewQueue.UnitTests.csproj" />
+    <Project Path="tests/BrewQueue.IntegrationTests/BrewQueue.IntegrationTests.csproj" />
+  </Folder>
+</Solution>

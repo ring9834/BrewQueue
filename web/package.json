@@ -1,0 +1,29 @@
+{
+  "name": "brewqueue-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nuxt dev",
+    "build": "nuxt build",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "typecheck": "nuxt typecheck",
+    "gen:api": "openapi-typescript http://localhost:5080/openapi/v1.json -o app/types/openapi.d.ts",
+    "postinstall": "nuxt prepare"
+  },
+  "devDependencies": {
+    "openapi-typescript": "^7.13.0",
+    "typescript": "~5.9",
+    "vue-tsc": "^3.3.13"
+  },
+  "dependencies": {
+    "@peterbud/nuxt-query": "^1.12.0",
+    "@pinia/nuxt": "^1.0.3",
+    "@tanstack/vue-query": "^5.104.3",
+    "nuxt": "^4.5.2",
+    "pinia": "^4.1.0",
+    "pinia-plugin-persistedstate": "^4.7.1",
+    "vue": "^3.5.44",
+    "vue-router": "^5.4.0"
+  }
+}

@@ -1,0 +1,3 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Pure domain model: no EF, no ASP.NET, no messaging. Easy to unit test. -->
+</Project>

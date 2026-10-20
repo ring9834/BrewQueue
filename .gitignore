@@ -1,0 +1,14 @@
+bin/
+obj/
+.vs/
+.idea/
+*.user
+TestResults/
+
+web/node_modules/
+web/.nuxt/
+web/.output/
+web/dist/
+web/.data/
+
+.env

@@ -1,0 +1,54 @@
+### BrewQueue API — open in VS Code (REST Client) or Rider/Visual Studio
+@api = http://localhost:5080
+
+### Menu
+GET {{api}}/api/menu
+
+### Place an order (run twice: second response is a replay with the same id)
+POST {{api}}/api/orders
+Content-Type: application/json
+Idempotency-Key: 3f1c1d7e-7d2a-4a36-9c64-0b8a6f6d1a01
+X-Correlation-Id: demo-correlation-1
+
+{
+  "customerName": "Aroha",
+  "lines": [
+    { "menuItemId": 1, "quantity": 2 },
+    { "menuItemId": 7, "quantity": 1 }
+  ]
+}
+
+### Same key, different body -> 422 idempotency_key_reused
+POST {{api}}/api/orders
+Content-Type: application/json
+Idempotency-Key: 3f1c1d7e-7d2a-4a36-9c64-0b8a6f6d1a01
+
+{ "customerName": "Someone else", "lines": [ { "menuItemId": 2, "quantity": 1 } ] }
+
+### Missing key -> 400 ValidationProblemDetails
+POST {{api}}/api/orders
+Content-Type: application/json
+
+{ "customerName": "Aroha", "lines": [ { "menuItemId": 1, "quantity": 1 } ] }
+
+### Unavailable item -> 422 menu_item_unavailable
+POST {{api}}/api/orders
+Content-Type: application/json
+Idempotency-Key: 8b0a3d52-1111-4c4b-9a0e-2f5d7a9c0b02
+
+{ "customerName": "Aroha", "lines": [ { "menuItemId": 9, "quantity": 1 } ] }
+
+### Board: active orders
+GET {{api}}/api/orders?status=Received&status=Preparing&status=Ready
+
+### Collect an order (replace the id)
+PATCH {{api}}/api/orders/00000000-0000-0000-0000-000000000000/status
+Content-Type: application/json
+
+{ "status": "Collected" }
+
+### Stats
+GET {{api}}/api/stats/summary?hours=12
+
+### Health
+GET {{api}}/health/ready
