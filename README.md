@@ -1,6 +1,3 @@
-# BrewQueue
-Kafka (order event stream), RabbitMQ (kitchen work queue), Redis (for Idempotency), Nuxt, Pinia, Postgres, Docker
-
 # BrewQueue ☕
 
 A small café ordering system built to practise a modern full stack: customers order from a menu, baristas move orders across a live board, and a stats page is built from an event stream.
