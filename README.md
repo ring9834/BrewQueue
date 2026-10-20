@@ -15,19 +15,6 @@ A small café ordering system built to practise a modern full stack: customers o
 
 <img width="2720" height="2240" alt="brewqueue_architecture_overview" src="https://github.com/user-attachments/assets/b811de8c-febd-4cf6-a069-62a20f50381f" />
 
-```
- Browser ──► Nuxt (SSR + SPA)
-              │  Pinia: cart, my order ids, board prefs, toasts
-              │  Vue Query: menu, orders, board, stats
-              ▼
-          BrewQueue.Api ──────────────► PostgreSQL  (orders, outbox, stats read model)
-           │ Idempotency filter ──────► Redis
-           │ OutboxPublisher (bg)
-           ├─► RabbitMQ  kitchen.orders ──► KitchenWorker ──PATCH status──► Api
-           │             └─ DLX ─► kitchen.orders.dlq
-           └─► Kafka     order-events (key = orderId) ──► StatsWorker ──► stats tables
-```
-
 ---
 
 ## Prerequisites
