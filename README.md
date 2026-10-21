@@ -7,8 +7,8 @@ A small café ordering system built to practise a modern full stack: customers o
 | API | ASP.NET Core 10 Web API (controllers), EF Core + PostgreSQL |
 | Cross-cutting | RFC 9457 ProblemDetails, Serilog + Seq, correlation ids, health checks, built-in OpenAPI + Scalar |
 | Idempotency | Redis (`Idempotency-Key` header on `POST /api/orders`) |
-| Messaging | Transactional outbox → **RabbitMQ** (kitchen work queue, retries, DLQ) and **Kafka** (order event stream) |
-| Workers | Kitchen worker (RabbitMQ consumer), Stats worker (Kafka consumer → read model) |
+| Messaging | Transactional outbox --> **RabbitMQ** (kitchen work queue, retries, DLQ) and **Kafka** (order event stream) |
+| Workers | Kitchen worker (RabbitMQ consumer), Stats worker (Kafka consumer --> read model) |
 | Frontend | Nuxt 4, Vue 3, TypeScript, **Pinia** (client state), **Nuxt Query / TanStack Vue Query** (server state) |
 | Tests | xUnit unit tests; integration tests with **Testcontainers** (Postgres, Redis, RabbitMQ, Kafka) |
 | Local deployment | Docker Compose |
@@ -73,8 +73,8 @@ dotnet test tests/BrewQueue.IntegrationTests   # Docker must be running; first r
 - The barista board (`pages/barista.vue`) moves cards **optimistically** and rolls back on failure.
 
 ### 2. Idempotency with Redis
-- `[Idempotent]` on `OrdersController.PlaceOrder` → `CrossCutting/IdempotencyFilter.cs`.
-- Redis `SET NX` claims the key atomically. Outcomes: first request → proceed; same key + same body → stored response replayed with `Idempotent-Replayed: true`; still running → 409; same key + different body → 422.
+- `[Idempotent]` on `OrdersController.PlaceOrder` --> `CrossCutting/IdempotencyFilter.cs`.
+- Redis `SET NX` claims the key atomically. Outcomes: first request --> proceed; same key + same body --> stored response replayed with `Idempotent-Replayed: true`; still running --> 409; same key + different body --> 422.
 - The cart store (`stores/cart.ts`) keeps one key per checkout attempt, so retrying after a network error can't create a second order.
 - Pure decision logic (`IdempotencyEvaluator`) is unit tested; the full behaviour (including 5 concurrent requests) is integration tested.
 
@@ -84,7 +84,7 @@ dotnet test tests/BrewQueue.IntegrationTests   # Docker must be running; first r
 - Delivery is at-least-once, so consumers are idempotent: setting a status the order already has is a no-op, and the stats projector dedupes by `EventId`.
 
 ### 4. RabbitMQ: commands, retries, dead letters
-- Topology (`Infrastructure/Messaging/RabbitMq.cs`): direct exchange → quorum queue `kitchen.orders`, with a dead-letter exchange → `kitchen.orders.dlq`.
+- Topology (`Infrastructure/Messaging/RabbitMq.cs`): direct exchange --> quorum queue `kitchen.orders`, with a dead-letter exchange --> `kitchen.orders.dlq`.
 - `KitchenWorker/KitchenConsumer.cs`: manual acks, prefetch, transient failures re-published with an `x-retry-count` header and exponential backoff, permanent failures and poison messages nacked to the DLQ.
 - Try `docker compose up -d --scale kitchen=3` and watch orders spread across workers.
 
@@ -94,7 +94,7 @@ dotnet test tests/BrewQueue.IntegrationTests   # Docker must be running; first r
 - `StatsWorker` commits offsets **after** the database update. Stop it, place orders, start it again: it catches up. Change `Kafka:ConsumerGroupId` to replay the topic from the start (the dedupe table then skips events it has already applied; clear the stats tables to rebuild from scratch).
 
 ### 6. Errors, logs, OpenAPI
-- Every error is `application/problem+json` with `traceId`, `correlationId` and a machine-readable `errorCode` (`CrossCutting/ErrorHandling.cs`). Domain rule violations → 422, not found → 404, concurrency → 409, validation → 400 with field errors, unexpected → 500 with details hidden outside Development.
+- Every error is `application/problem+json` with `traceId`, `correlationId` and a machine-readable `errorCode` (`CrossCutting/ErrorHandling.cs`). Domain rule violations --> 422, not found --> 404, concurrency --> 409, validation --> 400 with field errors, unexpected --> 500 with details hidden outside Development.
 - Optimistic concurrency uses PostgreSQL's `xmin` (`Order.Version`).
 - `X-Correlation-Id` is accepted or generated per request, stored on outbox rows, sent as a broker header and logged by both workers. In Seq, filter by `CorrelationId = '…'` to follow one order across all three services.
 - OpenAPI comes from the built-in `Microsoft.AspNetCore.OpenApi` generator, enriched by XML doc comments and `[ProducesResponseType]`. With the API running, `cd web && npm run gen:api` generates TypeScript types from it.
@@ -137,6 +137,6 @@ docker-compose.yml
 ## Ideas to extend it
 
 - Replace polling with Server-Sent Events or SignalR for the board and order page.
-- Add OpenTelemetry tracing across API → outbox → RabbitMQ → worker → API.
-- Run the kitchen consumer inside the integration tests and assert the full Received → Ready flow.
+- Add OpenTelemetry tracing across API --> outbox --> RabbitMQ --> worker --> API.
+- Run the kitchen consumer inside the integration tests and assert the full Received --> Ready flow.
 - Swap Vue Query for Pinia Colada on one page and compare.
