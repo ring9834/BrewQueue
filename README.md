@@ -16,7 +16,6 @@ A small café ordering system built to practise a modern full stack: customers o
 <p align="center">
 <img width="544" height="448" alt="brewqueue_architecture_sky_blue_beige" src="https://github.com/user-attachments/assets/ec2e1b06-41fd-4ad8-91b6-62a50e73d392" />
 </p>
----
 
 ## Prerequisites
 
