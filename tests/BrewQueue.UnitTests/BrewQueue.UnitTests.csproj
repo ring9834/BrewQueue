@@ -12,6 +12,9 @@
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="coverlet.collector" />
     <PackageReference Include="NSubstitute" />
+    <PackageReference Include="protobuf-net.Reflection">
+      <Aliases>ProtobufNet</Aliases>
+    </PackageReference>
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\BrewQueue.Domain\BrewQueue.Domain.csproj" />

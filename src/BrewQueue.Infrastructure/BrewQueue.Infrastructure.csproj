@@ -11,6 +11,9 @@
     <PackageReference Include="Confluent.SchemaRegistry.Serdes.Protobuf" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
+    <PackageReference Include="protobuf-net.Reflection">
+      <Aliases>ProtobufNet</Aliases>
+    </PackageReference>
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="BrewQueue.UnitTests" />

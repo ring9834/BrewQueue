@@ -25,6 +25,7 @@
     <PackageVersion Include="RabbitMQ.Client" Version="7.*" />
     <PackageVersion Include="Confluent.Kafka" Version="2.*" />
     <PackageVersion Include="Confluent.SchemaRegistry.Serdes.Protobuf" Version="2.*" />
+    <PackageVersion Include="protobuf-net.Reflection" Version="3.*" />
     <PackageVersion Include="Google.Protobuf" Version="3.*" />
     <PackageVersion Include="Grpc.Tools" Version="2.*" />
 

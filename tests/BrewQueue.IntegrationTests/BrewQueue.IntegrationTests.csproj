@@ -13,6 +13,9 @@
     <PackageReference Include="Testcontainers.Redis" />
     <PackageReference Include="Testcontainers.RabbitMq" />
     <PackageReference Include="Testcontainers.Kafka" />
+    <PackageReference Include="protobuf-net.Reflection">
+      <Aliases>ProtobufNet</Aliases>
+    </PackageReference>
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\BrewQueue.Api\BrewQueue.Api.csproj" />
