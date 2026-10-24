@@ -11,7 +11,7 @@ It covers five areas:
 4. bounded retries, a dead-letter topic, and alerts for lag and dead letters
 5. a Schema Registry with compatibility rules
 
-<p algin="center">
+<p align="center">
   <img width="544" height="480" alt="brewqueue_kafka_cluster_structure" src="https://github.com/user-attachments/assets/0de40847-3148-442b-a5cd-f40d7a01ac28" />
 </p>
 
