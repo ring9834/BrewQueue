@@ -55,7 +55,7 @@ builder.Services.AddScoped<OrderService>();
 builder.Services.AddScoped<StatsService>();
 builder.Services.Configure<OutboxOptions>(builder.Configuration.GetSection(OutboxOptions.SectionName));
 builder.Services.AddSingleton<OutboxPublisher>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<OutboxPublisher>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<OutboxPublisher>()); // hosted service: it owns a Kafka producer
 
 // ---------- Health checks ----------
 builder.Services.AddSingleton<KafkaHealthCheck>(); // singleton: it owns a Kafka admin client
