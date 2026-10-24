@@ -10,7 +10,7 @@
 
 name: brewqueue
 
-x-dotnet-env: &dotnet-env
+x-dotnet-env: &dotnet-env # an anchor that labels a mapping
   ASPNETCORE_ENVIRONMENT: Development
   DOTNET_ENVIRONMENT: Development
   ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=brewqueue;Username=brewqueue;Password=brewqueue
@@ -113,6 +113,11 @@ services:
       args: { PROJECT: BrewQueue.Api }
     environment:
       <<: *dotnet-env
+      # *dotnet-env is an alias that refers to the anchored mapping defined at the top of the file; 
+      # << copies the aliased mapping's keys into the current map. 
+      # The "current map" = the value of environment:, i.e., the mapping that << sits inside.
+      # The "aliased mapping" = the mapping referenced by *dotnet-env (defined via &dotnet-env on the top of the file).
+      # This avoids repeating the same environment variables for every service.
       Cors__Origins__0: http://localhost:3000
     ports: ["5080:8080"]
     depends_on:
@@ -147,7 +152,7 @@ services:
       dockerfile: src/Dockerfile
       args: { PROJECT: BrewQueue.StatsWorker }
     environment:
-      <<: *dotnet-env
+      <<: *dotnet-env 
     depends_on:
       api: { condition: service_healthy }
     restart: unless-stopped

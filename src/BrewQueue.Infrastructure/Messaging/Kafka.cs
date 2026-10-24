@@ -30,7 +30,7 @@ public sealed class KafkaProducer : IKafkaProducer, IDisposable
         {
             BootstrapServers = options.Value.BootstrapServers,
             // Kafka's own idempotent producer: retries can't create duplicates or reorder messages within a partition. (Implies Acks = All.)
-            EnableIdempotence = true,
+            EnableIdempotence = true, // Setting EnableIdempotence = true automatically forces acks=all (and retries > 0), which is why the explicit Acks = Acks.All is somewhat redundant but harmless/documentary.
             Acks = Acks.All, // Wait for all replicas to acknowledge before considering a message sent.
             LingerMs = 5, // Batch messages for a few milliseconds to improve throughput.
             ClientId = AppDomain.CurrentDomain.FriendlyName // For logging and metrics.

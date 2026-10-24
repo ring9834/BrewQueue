@@ -46,8 +46,8 @@ public sealed class OrderStatsProjector(BrewQueueDbContext db, ILogger<OrderStat
                 changed = true;
                 break;
             }
-            case OrderEventTypes.OrderStatusChanged when evt.Status == "Collected":
-            {
+            case OrderEventTypes.OrderStatusChanged when evt.Status == "Collected": // Collected means the order was picked up by the customer, so we count it as "collected" for stats
+                {
                 var hour = await GetOrAddHourAsync(hourStart, ct);
                 hour.OrdersCollected++;
                 changed = true;
@@ -55,6 +55,7 @@ public sealed class OrderStatsProjector(BrewQueueDbContext db, ILogger<OrderStat
             }
         }
 
+        // Mark the event as processed in the same transaction as the projection change, so a crash can never leave one without the other.
         db.ProcessedEvents.Add(new ProcessedEvent { EventId = evt.EventId, ProcessedAt = DateTimeOffset.UtcNow });
         await db.SaveChangesAsync(ct); // one SaveChanges = one transaction
         return changed;
