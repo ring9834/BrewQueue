@@ -1,4 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk.Worker">
+  <PropertyGroup>
+    <!-- Lets you keep Kafka:SaslPassword out of appsettings when running on your machine. -->
+    <UserSecretsId>brewqueue-stats</UserSecretsId>
+  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\BrewQueue.Infrastructure\BrewQueue.Infrastructure.csproj" />
   </ItemGroup>

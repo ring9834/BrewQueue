@@ -13,9 +13,6 @@ const MAX_QUANTITY = 20
 /**
  * Client state: only the browser knows what's in the cart, so Pinia owns it.
  * Persisted (cookie) so it survives reloads and is visible during SSR.
- * A Pinia store is owned by a user session, so each user has their own cart. The server never sees the cart until checkout.
- * The cart is cleared after a successful order, but the customer name is kept for next time.
- * The checkoutKey is used to avoid duplicate orders on network errors or retries.
  */
 export const useCartStore = defineStore(
   'cart',
@@ -99,6 +96,6 @@ export const useCartStore = defineStore(
     }
   },
   {
-    persist: { pick: ['lines', 'customerName', 'checkoutKey'] }, // only persist the cart, not the computed totals
+    persist: { pick: ['lines', 'customerName', 'checkoutKey'] },
   },
 )

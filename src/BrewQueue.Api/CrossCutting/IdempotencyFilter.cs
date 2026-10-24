@@ -56,35 +56,35 @@ public sealed class IdempotencyFilter(
 
         switch (decision.Kind)
         {
-            case IdempotencyDecisionKind.Replay: // The key was already used with the same request body, so we can replay the stored response.
+            case IdempotencyDecisionKind.Replay:
                 logger.LogInformation("Replaying stored response for idempotency key {IdempotencyKey}", key);
                 var record = decision.Existing!;
                 http.Response.Headers[ReplayedHeader] = "true";
                 if (record.Location is not null) http.Response.Headers.Location = record.Location;
-                context.Result = new ContentResult // Return the stored response body and status code.
+                context.Result = new ContentResult
                 {
                     StatusCode = record.StatusCode,
                     Content = record.ResponseBody,
                     ContentType = "application/json; charset=utf-8"
                 };
-                return; // The action is not executed; the stored response is returned instead.
+                return;
 
             case IdempotencyDecisionKind.InProgress:
-                http.Response.Headers.RetryAfter = "1"; // Suggest the client retry after 1 second.
+                http.Response.Headers.RetryAfter = "1";
                 context.Result = Problem(http, StatusCodes.Status409Conflict, "Request already in progress",
                     "A request with this Idempotency-Key is still being processed. Retry shortly.",
                     "idempotency_in_progress");
-                return; // The action is not executed; the client should retry later.
+                return;
 
-            case IdempotencyDecisionKind.PayloadMismatch: // The key was already used with a different request body, so we can't proceed.
+            case IdempotencyDecisionKind.PayloadMismatch:
                 context.Result = Problem(http, StatusCodes.Status422UnprocessableEntity, "Idempotency-Key reused",
                     "This Idempotency-Key was already used with a different request body.",
                     "idempotency_key_reused");
-                return; // The action is not executed; the client should use a different key.
+                return;
         }
 
         // Proceed: we own the key. Run the action, then store or release.
-        var executed = await next(); // next() executes the action and returns an ActionExecutedContext
+        var executed = await next();
 
         var succeeded = executed.Exception is null || executed.ExceptionHandled;
         if (succeeded && executed.Result is ObjectResult { Value: not null } result
@@ -94,7 +94,6 @@ public sealed class IdempotencyFilter(
                 jsonOptions.Value.JsonSerializerOptions);
             var location = (result as CreatedResult)?.Location;
 
-            // Here the key already holds {Processing, fingerprint}, and the call replaces it with {Completed, fingerprint, 201, body, location}. Because an expiry is passed, it also swaps the 30-second lock TTL for the 24-hour response TTL. Had the expiry been omitted, the Completed record would never expire and Redis would slowly fill up.
             await store.CompleteAsync(storeKey,
                 new IdempotencyRecord(IdempotencyState.Completed, fingerprint,
                     result.StatusCode ?? StatusCodes.Status200OK, body, location),

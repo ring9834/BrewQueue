@@ -6,8 +6,11 @@ using BrewQueue.Contracts;
 using BrewQueue.Infrastructure.Messaging;
 using BrewQueue.IntegrationTests.Infrastructure;
 using Confluent.Kafka;
+using Confluent.SchemaRegistry;
+using Confluent.SchemaRegistry.Serdes;
 using RabbitMQ.Client;
 using static BrewQueue.IntegrationTests.Infrastructure.TestHelpers;
+using Proto = BrewQueue.Contracts.Events.V1;
 
 namespace BrewQueue.IntegrationTests;
 
@@ -97,14 +100,18 @@ public class MessagingTests(ApiFactory factory) : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Status_changes_are_published_to_Kafka_keyed_by_order_id()
+    public async Task Status_changes_are_published_to_Kafka_as_schema_registry_framed_protobuf()
     {
         var order = await PlaceAsync();
         var patch = await _client.PatchAsJsonAsync($"/api/orders/{order.Id}/status",
             new { status = "Preparing" }, ApiFactory.Json);
         patch.EnsureSuccessStatusCode();
 
-        using var consumer = new ConsumerBuilder<string, string>(new ConsumerConfig
+        var registeredId = await GetLatestSchemaIdAsync();
+        var deserializer = new ProtobufDeserializer<Proto.OrderEvent>(null,
+            new ProtobufDeserializerConfig { SubjectNameStrategy = SubjectNameStrategy.Topic });
+
+        using var consumer = new ConsumerBuilder<string, byte[]>(new ConsumerConfig
         {
             BootstrapServers = factory.Kafka.GetBootstrapAddress(),
             GroupId = $"test-{Guid.NewGuid()}", // fresh group => reads the topic from the start
@@ -112,27 +119,47 @@ public class MessagingTests(ApiFactory factory) : IAsyncLifetime
         }).Build();
         consumer.Subscribe(MessagingNames.OrderEventsTopic);
 
-        var seen = new List<(string Key, OrderEvent Event)>();
-        await EventuallyAsync(() =>
+        var seen = new List<(string Key, int SchemaId, OrderEvent Event)>();
+        await EventuallyAsync(async () =>
         {
             var result = consumer.Consume(TimeSpan.FromSeconds(1));
             if (result?.Message is not null)
-                seen.Add((result.Message.Key, JsonSerializer.Deserialize<OrderEvent>(result.Message.Value, Json)!));
+            {
+                var bytes = result.Message.Value;
+                // Confluent framing: magic byte 0, then the 4-byte big-endian schema id.
+                Assert.Equal(0, bytes[0]);
+                var schemaId = System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(bytes.AsSpan(1, 4));
+                var proto = await deserializer.DeserializeAsync(bytes, false,
+                    new SerializationContext(MessageComponentType.Value, result.Topic, result.Message.Headers));
+                seen.Add((result.Message.Key, schemaId, OrderEventMapper.FromProto(proto)));
+            }
 
             var done = seen.Any(s => s.Event.OrderId == order.Id && s.Event.EventType == OrderEventTypes.OrderStatusChanged);
-            return Task.FromResult(done ? seen : null);
+            return done ? seen : null;
         }, Timeout, "OrderStatusChanged on Kafka");
 
         consumer.Close();
 
         var ours = seen.Where(s => s.Event.OrderId == order.Id).ToList();
         Assert.All(ours, s => Assert.Equal(order.Id.ToString(), s.Key));
+        Assert.All(ours, s => Assert.Equal(registeredId, s.SchemaId)); // the app used the registered schema
         Assert.Equal(new[] { OrderEventTypes.OrderPlaced, OrderEventTypes.OrderStatusChanged },
             ours.Select(s => s.Event.EventType));
+
+        var placed = ours.First().Event;
+        Assert.Equal(order.Total, placed.Total);
+        Assert.Null(placed.PreviousStatus);
 
         var changed = ours.Last().Event;
         Assert.Equal("Received", changed.PreviousStatus);
         Assert.Equal("Preparing", changed.Status);
+    }
+
+    private async Task<int> GetLatestSchemaIdAsync()
+    {
+        using var http = factory.CreateSchemaRegistryClient();
+        var latest = await http.GetFromJsonAsync<JsonElement>($"/subjects/{ApiFactory.OrderEventsSubject}/versions/latest");
+        return latest.GetProperty("id").GetInt32();
     }
 
     private async Task<OrderDto> PlaceAsync()

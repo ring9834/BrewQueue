@@ -13,15 +13,28 @@ public static class MessagingNames
     // Kafka: a durable stream of facts that many consumers can read and replay.
     public const string OrderEventsTopic = "order-events";
 
+    /// <summary>Events the stats worker gave up on. Same key and value bytes as the original.</summary>
+    public const string OrderEventsDeadLetterTopic = "order-events.dlt";
+
+    /// <summary>Kafka consumer group of the stats worker. Referenced by ACLs and lag alerts.</summary>
+    public const string StatsConsumerGroup = "brewqueue-stats";
+
     // Header names used to carry metadata across process boundaries.
     public const string CorrelationIdHeader = "x-correlation-id";
     public const string RetryCountHeader = "x-retry-count";
     public const string MessageTypeHeader = "x-message-type";
+
+    // Added to dead-lettered messages so an operator can see where they came from and why.
+    public const string DltOriginalTopicHeader = "dlt-original-topic";
+    public const string DltOriginalPartitionHeader = "dlt-original-partition";
+    public const string DltOriginalOffsetHeader = "dlt-original-offset";
+    public const string DltReasonHeader = "dlt-reason";
+    public const string DltErrorHeader = "dlt-error";
+    public const string DltAttemptsHeader = "dlt-attempts";
+    public const string DltFailedAtHeader = "dlt-failed-at";
 }
 
-/// <summary>
-/// RabbitMQ command: "please prepare this order".
-/// </summary>
+/// <summary>RabbitMQ command: "please prepare this order".</summary>
 public sealed record PrepareOrderCommand(
     Guid OrderId,
     string CustomerName,
@@ -30,9 +43,7 @@ public sealed record PrepareOrderCommand(
 
 public sealed record PrepareOrderLine(string Name, int Quantity);
 
-/// <summary>
-/// Kafka event types published to <see cref="MessagingNames.OrderEventsTopic"/>.
-/// </summary>
+/// <summary>Kafka event types published to <see cref="MessagingNames.OrderEventsTopic"/>.</summary>
 public static class OrderEventTypes
 {
     public const string OrderPlaced = "OrderPlaced";

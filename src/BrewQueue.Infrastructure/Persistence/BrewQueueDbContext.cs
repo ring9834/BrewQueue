@@ -55,8 +55,12 @@ public sealed class BrewQueueDbContext(DbContextOptions<BrewQueueDbContext> opti
             e.Property(x => x.Key).HasMaxLength(100);
             e.Property(x => x.Payload).HasColumnType("jsonb");
             e.Property(x => x.CorrelationId).HasMaxLength(100);
-            // Partial index: the publisher only ever scans unprocessed rows.
-            e.HasIndex(x => x.OccurredAt).HasFilter("\"ProcessedAt\" IS NULL");
+            e.Property(x => x.Sequence).UseIdentityAlwaysColumn();
+            // Partial index: the publisher only ever scans unpublished, non-abandoned rows, in Sequence order.
+            e.HasIndex(x => x.Sequence, "ix_outbox_messages_pending")
+                .HasFilter("\"ProcessedAt\" IS NULL AND \"AbandonedAt\" IS NULL");
+            // For the cleanup job that deletes old published rows.
+            e.HasIndex(x => x.ProcessedAt, "ix_outbox_messages_processed_at");
         });
 
         b.Entity<HourlyOrderStat>(e =>
@@ -64,6 +68,7 @@ public sealed class BrewQueueDbContext(DbContextOptions<BrewQueueDbContext> opti
             e.ToTable("stats_hourly_orders");
             e.HasKey(x => x.HourStart);
             e.Property(x => x.Revenue).HasPrecision(12, 2);
+            e.Property(x => x.Version).IsRowVersion();
         });
 
         b.Entity<ItemPopularity>(e =>
@@ -72,12 +77,14 @@ public sealed class BrewQueueDbContext(DbContextOptions<BrewQueueDbContext> opti
             e.HasKey(x => x.MenuItemId);
             e.Property(x => x.MenuItemId).ValueGeneratedNever();
             e.Property(x => x.Name).HasMaxLength(80);
+            e.Property(x => x.Version).IsRowVersion();
         });
 
         b.Entity<ProcessedEvent>(e =>
         {
             e.ToTable("processed_events");
             e.HasKey(x => x.EventId);
+            e.HasIndex(x => x.ProcessedAt); // for pruning old rows
         });
     }
 }

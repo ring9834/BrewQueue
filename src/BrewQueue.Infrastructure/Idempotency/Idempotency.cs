@@ -15,7 +15,7 @@ public sealed record IdempotencyRecord(
     string Fingerprint,
     int? StatusCode = null,
     string? ResponseBody = null,
-    string? Location = null); // Location is the URL of the created resource, if applicable. It is stored so that subsequent retries with the same idempotency key can return the same Location header. One example of the URL of the created resource is /api/orders/{orderId} for a newly created order.
+    string? Location = null);
 
 public enum IdempotencyDecisionKind
 {
@@ -57,7 +57,8 @@ public static class IdempotencyEvaluator
 public interface IIdempotencyStore
 {
     /// <summary>
-    /// Atomically claims the key (Redis SET NX). Returns null if we claimed it, otherwise the record that already exists.
+    /// Atomically claims the key (Redis SET NX). Returns null if we claimed it,
+    /// otherwise the record that already exists.
     /// </summary>
     Task<IdempotencyRecord?> TryClaimAsync(string key, string fingerprint, CancellationToken ct);
 
@@ -92,12 +93,10 @@ public sealed class RedisIdempotencyStore(IConnectionMultiplexer redis, Microsof
         var processing = new IdempotencyRecord(IdempotencyState.Processing, fingerprint);
 
         // SET key value NX EX ttl — atomic "claim if absent".
-        // When.NotExists means "only set if the key does not already exist", which is exactly what we want for claiming an idempotency key. If five identical requests arrive at the same instant, exactly one succeeds in setting the key; the other four get “already exists”. When the other four get “already exists”, the returned 'claimed' will be false.
-        // When.NotExists adds NX, so the “overwrite” behaviour from the docs doesn’t apply. If the key exists, Redis leaves it untouched and returns false. That’s the whole point of the claim: overwriting here would let a second request replace the first one’s lock and both would create an order.
         var claimed = await db.StringSetAsync(
             Key(key), JsonSerializer.Serialize(processing, Json), _options.LockTtl, When.NotExists);
 
-        if (claimed) return null; // We claimed the key, so the caller can proceed with the request. "the caller" here means the code that called TryClaimAsync, which is likely the controller action handling the HTTP request.
+        if (claimed) return null;
 
         var existing = await db.StringGetAsync(Key(key));
         // The key may have expired between the two calls; treat it as in progress to be safe.
@@ -107,7 +106,7 @@ public sealed class RedisIdempotencyStore(IConnectionMultiplexer redis, Microsof
     }
 
     public Task CompleteAsync(string key, IdempotencyRecord record, CancellationToken ct) =>
-        redis.GetDatabase().StringSetAsync(Key(key), JsonSerializer.Serialize(record, Json), _options.ResponseTtl); // When.Always is the default
+        redis.GetDatabase().StringSetAsync(Key(key), JsonSerializer.Serialize(record, Json), _options.ResponseTtl);
 
     public Task ReleaseAsync(string key, CancellationToken ct) =>
         redis.GetDatabase().KeyDeleteAsync(Key(key));

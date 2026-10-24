@@ -1,0 +1,107 @@
+# Unit tests for alerts.yml. Run: promtool test rules infra/monitoring/alerts.test.yml
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  # A message lands in the dead-letter topic -> alert fires on the next evaluation.
+  - interval: 1m
+    input_series:
+      - series: 'kafka_topic_partition_current_offset{topic="order-events.dlt", partition="0"}'
+        values: "0 0 0 1 1 1"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: OrderEventsDeadLettered
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: OrderEventsDeadLettered
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "1 order event(s) dead-lettered in the last 10 minutes"
+              description: >-
+                Open order-events.dlt in Kafka UI. The dlt-reason and dlt-error headers say why each
+                message failed. Fix the cause, then replay (see README, "Replaying dead letters").
+
+  # Lag above 0 and the committed offset frozen -> pending first, critical after 5 minutes.
+  - interval: 1m
+    input_series:
+      - series: 'kafka_consumergroup_lag_sum{consumergroup="brewqueue-stats", topic="order-events"}'
+        values: "5x30"
+      - series: 'kafka_consumergroup_current_offset_sum{consumergroup="brewqueue-stats", topic="order-events"}'
+        values: "100x30"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: StatsConsumerStuck
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: StatsConsumerStuck
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "Stats worker is stuck: 5 events waiting, no progress"
+              description: "Check the stats worker logs (Seq) for repeated 'Transient failure' warnings."
+
+  # Lag but the consumer is making progress -> "lag high", never "stuck".
+  - interval: 1m
+    input_series:
+      - series: 'kafka_consumergroup_lag_sum{consumergroup="brewqueue-stats", topic="order-events"}'
+        values: "150x20"
+      - series: 'kafka_consumergroup_current_offset_sum{consumergroup="brewqueue-stats", topic="order-events"}'
+        values: "100+10x20"
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: StatsConsumerStuck
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: StatsConsumerLagHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Stats worker is 150 events behind"
+              description: "Stats are stale. Check whether the worker is overloaded or the database is slow."
+
+  # One broker down.
+  - interval: 1m
+    input_series:
+      - series: 'kafka_brokers'
+        values: "3 3 2 2 2"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: KafkaBrokerDown
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: KafkaBrokerDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "Only 2 of 3 Kafka brokers are reachable"
+              description: >-
+                The cluster still accepts writes while at least 2 replicas are in sync
+                (min.insync.replicas=2), but one more failure stops all producers.
+
+  # A partition with a single in-sync replica. Internal topics (__*) are excluded.
+  - interval: 1m
+    input_series:
+      - series: 'kafka_topic_partition_in_sync_replica{topic="order-events", partition="2"}'
+        values: "3 3 1 1 1"
+      - series: 'kafka_topic_partition_in_sync_replica{topic="__consumer_offsets", partition="0"}'
+        values: "1 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: KafkaPartitionBelowMinIsr
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              topic: order-events
+              partition: "2"
+            exp_annotations:
+              summary: "order-events/2 has fewer than 2 in-sync replicas"
+              description: >-
+                Producers using acks=all (all BrewQueue producers) are being rejected for this
+                partition. Writes stay in the outbox until replicas catch up.

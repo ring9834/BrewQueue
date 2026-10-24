@@ -1,15 +1,20 @@
 # BrewQueue local environment.
 #
+#   First time:            cp .env.example .env        (then change the passwords)
 #   Everything:            docker compose up -d --build
-#   Infrastructure only:   docker compose up -d postgres redis rabbitmq kafka seq kafka-ui
-#                          (then run the .NET projects and `npm run dev` from your IDE/terminal)
+#   Infrastructure only:   docker compose up -d postgres redis rabbitmq seq schema-init kafka-ui prometheus alertmanager
+#                          (then run the .NET projects and `npm run dev` from your IDE/terminal; see README)
 #
 # UIs:  web http://localhost:3000 · API docs http://localhost:5080/scalar/v1
-#       RabbitMQ http://localhost:15672 (brewqueue/brewqueue) · Kafka UI http://localhost:8081
-#       Seq logs http://localhost:5341
+#       RabbitMQ http://localhost:15672 · Kafka UI http://localhost:8081 · Seq http://localhost:5341
+#       Prometheus http://localhost:9090 · Alertmanager http://localhost:9093
+#
+# Kafka here is a 3-node, TLS + SASL/SCRAM + ACL cluster with Schema Registry. Startup order:
+#   kafka-certs -> kafka-1/2/3 -> kafka-setup (users, topics, ACLs) -> schema-registry -> schema-init -> apps
 
 name: brewqueue
 
+# ---------------------------------------------------------------- shared settings
 x-dotnet-env: &dotnet-env
   ASPNETCORE_ENVIRONMENT: Development
   DOTNET_ENVIRONMENT: Development
@@ -18,11 +23,36 @@ x-dotnet-env: &dotnet-env
   RabbitMq__HostName: rabbitmq
   RabbitMq__UserName: brewqueue
   RabbitMq__Password: brewqueue
-  Kafka__BootstrapServers: kafka:19092
+  Kafka__BootstrapServers: kafka-1:9092,kafka-2:9092,kafka-3:9092
+  Kafka__SecurityProtocol: SaslSsl
+  Kafka__SaslMechanism: ScramSha512
+  Kafka__SslCaLocation: /etc/brewqueue/kafka/ca.crt
+  Kafka__ManageTopics: "false"           # topics are owned by kafka-setup, not by the apps
+  SchemaRegistry__Url: https://schema-registry:8081
+  SchemaRegistry__SslCaLocation: /etc/brewqueue/kafka/ca.crt
   Serilog__WriteTo__1__Args__serverUrl: http://seq:5341
 
+x-kafka-env: &kafka-env
+  CLUSTER_ID: 5L6g3nShT-eMCtK--X86sw     # any base64 UUID; must be the same on every node
+  CERT_PASSWORD: ${CERT_PASSWORD:?copy .env.example to .env}
+  KAFKA_ADMIN_PASSWORD: ${KAFKA_ADMIN_PASSWORD:?copy .env.example to .env}
+  KAFKA_HEAP_OPTS: -Xms512m -Xmx512m     # small for a laptop; production brokers get several GB
+
+x-kafka-node: &kafka-node
+  image: apache/kafka:4.0.0
+  entrypoint: ["/bin/bash", "/opt/brewqueue/start-kafka.sh"]
+  depends_on:
+    kafka-certs: { condition: service_completed_successfully }
+  restart: unless-stopped
+
+x-kafka-healthcheck: &kafka-healthcheck
+  interval: 15s
+  timeout: 20s
+  retries: 20
+  start_period: 30s
+
 services:
-  # ---------------------------------------------------------------- infrastructure
+  # ---------------------------------------------------------------- core infrastructure
   postgres:
     image: postgres:17-alpine
     environment:
@@ -61,41 +91,6 @@ services:
       timeout: 10s
       retries: 20
 
-  # Single-node Kafka in KRaft mode (no ZooKeeper).
-  # Two listeners: kafka:19092 for containers, localhost:9092 for apps running on your machine.
-  kafka:
-    image: apache/kafka:4.0.0
-    environment:
-      KAFKA_NODE_ID: 1
-      KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_LISTENERS: INTERNAL://:19092,EXTERNAL://:9092,CONTROLLER://:9093
-      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:19092,EXTERNAL://localhost:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
-      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      KAFKA_NUM_PARTITIONS: 3
-    ports: ["9092:9092"]
-    # No volume: topics and offsets reset when the container is recreated (fine for local dev).
-    healthcheck:
-      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
-      interval: 10s
-      timeout: 10s
-      retries: 20
-
-  kafka-ui:
-    image: kafbat/kafka-ui:latest
-    environment:
-      KAFKA_CLUSTERS_0_NAME: brewqueue
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:19092
-    ports: ["8081:8080"]
-    depends_on:
-      kafka: { condition: service_healthy }
-
   # Structured log viewer. Search e.g. CorrelationId = 'abc' to follow one order across services.
   seq:
     image: datalust/seq:latest
@@ -104,6 +99,216 @@ services:
       SEQ_FIRSTRUN_NOAUTHENTICATION: "true"
     ports: ["5341:80"] # UI and ingestion on one host port
     volumes: [seqdata:/data]
+
+  # ---------------------------------------------------------------- Kafka cluster
+  # One-shot: creates the CA and TLS keystores in ./infra/kafka/secrets (skipped if they exist).
+  kafka-certs:
+    image: apache/kafka:4.0.0
+    user: root
+    entrypoint: ["/bin/bash", "/opt/brewqueue/generate-certs.sh"]
+    environment:
+      CERT_PASSWORD: ${CERT_PASSWORD:?copy .env.example to .env}
+      CERT_DIR: /secrets
+    volumes:
+      - ./infra/kafka/generate-certs.sh:/opt/brewqueue/generate-certs.sh:ro
+      - ./infra/kafka/secrets:/secrets
+
+  # Three nodes, each broker + KRaft controller, each in its own "zone" (broker.rack).
+  # Replication factor 3 with min.insync.replicas=2: any one node can fail without losing
+  # data or stopping writes. Try: docker compose stop kafka-2   (and watch Prometheus alerts)
+  kafka-1:
+    <<: *kafka-node
+    hostname: kafka-1
+    environment:
+      <<: *kafka-env
+      NODE_ID: 1
+      EXTERNAL_PORT: 19092
+    ports: ["19092:19092"]
+    volumes:
+      - ./infra/kafka/start-kafka.sh:/opt/brewqueue/start-kafka.sh:ro
+      - ./infra/kafka/secrets:/etc/kafka/secrets:ro
+      - kafka1data:/var/lib/kafka/data
+    healthcheck:
+      <<: *kafka-healthcheck
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server kafka-1:9092 --command-config /opt/kafka/config/admin-client.properties > /dev/null 2>&1"]
+
+  kafka-2:
+    <<: *kafka-node
+    hostname: kafka-2
+    environment:
+      <<: *kafka-env
+      NODE_ID: 2
+      EXTERNAL_PORT: 19093
+    ports: ["19093:19092"]
+    volumes:
+      - ./infra/kafka/start-kafka.sh:/opt/brewqueue/start-kafka.sh:ro
+      - ./infra/kafka/secrets:/etc/kafka/secrets:ro
+      - kafka2data:/var/lib/kafka/data
+    healthcheck:
+      <<: *kafka-healthcheck
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server kafka-2:9092 --command-config /opt/kafka/config/admin-client.properties > /dev/null 2>&1"]
+
+  kafka-3:
+    <<: *kafka-node
+    hostname: kafka-3
+    environment:
+      <<: *kafka-env
+      NODE_ID: 3
+      EXTERNAL_PORT: 19094
+    ports: ["19094:19092"]
+    volumes:
+      - ./infra/kafka/start-kafka.sh:/opt/brewqueue/start-kafka.sh:ro
+      - ./infra/kafka/secrets:/etc/kafka/secrets:ro
+      - kafka3data:/var/lib/kafka/data
+    healthcheck:
+      <<: *kafka-healthcheck
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server kafka-3:9092 --command-config /opt/kafka/config/admin-client.properties > /dev/null 2>&1"]
+
+  # One-shot: SCRAM users, topics and ACLs (infra/kafka/setup-kafka.sh). Idempotent.
+  kafka-setup:
+    image: apache/kafka:4.0.0
+    entrypoint: ["/bin/bash", "/opt/brewqueue/setup-kafka.sh"]
+    environment:
+      CERT_PASSWORD: ${CERT_PASSWORD}
+      KAFKA_ADMIN_PASSWORD: ${KAFKA_ADMIN_PASSWORD}
+      KAFKA_API_PASSWORD: ${KAFKA_API_PASSWORD:?copy .env.example to .env}
+      KAFKA_STATS_PASSWORD: ${KAFKA_STATS_PASSWORD:?copy .env.example to .env}
+      KAFKA_SCHEMA_REGISTRY_PASSWORD: ${KAFKA_SCHEMA_REGISTRY_PASSWORD:?copy .env.example to .env}
+      KAFKA_UI_PASSWORD: ${KAFKA_UI_PASSWORD:?copy .env.example to .env}
+      KAFKA_EXPORTER_PASSWORD: ${KAFKA_EXPORTER_PASSWORD:?copy .env.example to .env}
+      KAFKA_HEAP_OPTS: -Xmx256m
+    volumes:
+      - ./infra/kafka/setup-kafka.sh:/opt/brewqueue/setup-kafka.sh:ro
+      - ./infra/kafka/secrets:/etc/kafka/secrets:ro
+    depends_on:
+      kafka-1: { condition: service_healthy }
+      kafka-2: { condition: service_healthy }
+      kafka-3: { condition: service_healthy }
+
+  # ---------------------------------------------------------------- Schema Registry
+  # HTTPS + HTTP Basic auth. Stores schemas in the _schemas topic (RF 3) as user "schema-registry".
+  # Default compatibility BACKWARD_TRANSITIVE: a new schema must read data written by EVERY older version.
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.9.0
+    hostname: schema-registry
+    entrypoint: ["/bin/bash", "/opt/brewqueue/start-schema-registry.sh"]
+    environment:
+      SR_ADMIN_PASSWORD: ${SR_ADMIN_PASSWORD:?copy .env.example to .env}
+      SR_API_PASSWORD: ${SR_API_PASSWORD:?copy .env.example to .env}
+      SR_UI_PASSWORD: ${SR_UI_PASSWORD:?copy .env.example to .env}
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_LISTENERS: https://0.0.0.0:8081
+      SCHEMA_REGISTRY_SCHEMA_REGISTRY_INTER_INSTANCE_PROTOCOL: https
+      SCHEMA_REGISTRY_SSL_KEYSTORE_TYPE: PKCS12
+      SCHEMA_REGISTRY_SSL_KEYSTORE_LOCATION: /etc/schema-registry/secrets/schema-registry.keystore.p12
+      SCHEMA_REGISTRY_SSL_KEYSTORE_PASSWORD: ${CERT_PASSWORD}
+      SCHEMA_REGISTRY_SSL_KEY_PASSWORD: ${CERT_PASSWORD}
+      SCHEMA_REGISTRY_AUTHENTICATION_METHOD: BASIC
+      SCHEMA_REGISTRY_AUTHENTICATION_REALM: SchemaRegistry
+      SCHEMA_REGISTRY_AUTHENTICATION_ROLES: admin,user
+      SCHEMA_REGISTRY_SCHEMA_COMPATIBILITY_LEVEL: backward_transitive
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: SASL_SSL://kafka-1:9092,SASL_SSL://kafka-2:9092,SASL_SSL://kafka-3:9092
+      SCHEMA_REGISTRY_KAFKASTORE_SECURITY_PROTOCOL: SASL_SSL
+      SCHEMA_REGISTRY_KAFKASTORE_SASL_MECHANISM: SCRAM-SHA-512
+      SCHEMA_REGISTRY_KAFKASTORE_SASL_JAAS_CONFIG: org.apache.kafka.common.security.scram.ScramLoginModule required username="schema-registry" password="${KAFKA_SCHEMA_REGISTRY_PASSWORD}";
+      SCHEMA_REGISTRY_KAFKASTORE_SSL_TRUSTSTORE_TYPE: PKCS12
+      SCHEMA_REGISTRY_KAFKASTORE_SSL_TRUSTSTORE_LOCATION: /etc/schema-registry/secrets/truststore.p12
+      SCHEMA_REGISTRY_KAFKASTORE_SSL_TRUSTSTORE_PASSWORD: ${CERT_PASSWORD}
+      SCHEMA_REGISTRY_KAFKASTORE_TOPIC: _schemas
+      SCHEMA_REGISTRY_KAFKASTORE_TOPIC_REPLICATION_FACTOR: 3
+      SCHEMA_REGISTRY_HEAP_OPTS: -Xmx384m
+    ports: ["8085:8081"]
+    volumes:
+      - ./infra/schema-registry/start-schema-registry.sh:/opt/brewqueue/start-schema-registry.sh:ro
+      - ./infra/kafka/secrets:/etc/schema-registry/secrets:ro
+    depends_on:
+      kafka-setup: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS --cacert /etc/schema-registry/secrets/ca.crt -u \"admin:$$SR_ADMIN_PASSWORD\" https://schema-registry:8081/subjects > /dev/null"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+
+  # One-shot: checks compatibility and registers src/BrewQueue.Contracts/Protos/*.proto.
+  # The apps never register schemas themselves, so this is the only way a new version gets in.
+  schema-init:
+    image: python:3.13-alpine
+    command: ["python3", "/opt/brewqueue/register_schemas.py"]
+    environment:
+      SR_URL: https://schema-registry:8081
+      SR_USER: admin
+      SR_PASSWORD: ${SR_ADMIN_PASSWORD}
+      SR_CA_FILE: /etc/brewqueue/kafka/ca.crt
+      SCHEMAS_DIR: /schemas
+    volumes:
+      - ./infra/schema-registry/register_schemas.py:/opt/brewqueue/register_schemas.py:ro
+      - ./infra/kafka/secrets/public:/etc/brewqueue/kafka:ro
+      - ./src/BrewQueue.Contracts/Protos:/schemas:ro
+    depends_on:
+      schema-registry: { condition: service_healthy }
+
+  # Read-only Kafka UI with a login form. Decodes Protobuf messages via Schema Registry.
+  kafka-ui:
+    image: kafbat/kafka-ui:v1.4.2
+    environment:
+      AUTH_TYPE: LOGIN_FORM
+      SPRING_SECURITY_USER_NAME: admin
+      SPRING_SECURITY_USER_PASSWORD: ${KAFKA_UI_LOGIN_PASSWORD:?copy .env.example to .env}
+      KAFKA_CLUSTERS_0_NAME: brewqueue
+      KAFKA_CLUSTERS_0_READONLY: "true"
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka-1:9092,kafka-2:9092,kafka-3:9092
+      KAFKA_CLUSTERS_0_PROPERTIES_SECURITY_PROTOCOL: SASL_SSL
+      KAFKA_CLUSTERS_0_PROPERTIES_SASL_MECHANISM: SCRAM-SHA-512
+      KAFKA_CLUSTERS_0_PROPERTIES_SASL_JAAS_CONFIG: org.apache.kafka.common.security.scram.ScramLoginModule required username="kafka-ui" password="${KAFKA_UI_PASSWORD}";
+      KAFKA_CLUSTERS_0_SSL_TRUSTSTORELOCATION: /etc/brewqueue/kafka/truststore.p12
+      KAFKA_CLUSTERS_0_SSL_TRUSTSTOREPASSWORD: ${CERT_PASSWORD}
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: https://schema-registry:8081
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRYAUTH_USERNAME: kafka-ui
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRYAUTH_PASSWORD: ${SR_UI_PASSWORD}
+    ports: ["8081:8080"]
+    volumes:
+      - ./infra/kafka/secrets/public:/etc/brewqueue/kafka:ro
+    depends_on:
+      schema-init: { condition: service_completed_successfully }
+
+  # ---------------------------------------------------------------- monitoring
+  # Exposes consumer lag, topic offsets and replication state as Prometheus metrics.
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.9.0
+    command:
+      - --kafka.server=kafka-1:9092
+      - --kafka.server=kafka-2:9092
+      - --kafka.server=kafka-3:9092
+      - --kafka.version=3.7.0
+      - --sasl.enabled
+      - --sasl.mechanism=scram-sha512
+      - --sasl.username=kafka-exporter
+      - --sasl.password=${KAFKA_EXPORTER_PASSWORD}
+      - --tls.enabled
+      - --tls.ca-file=/etc/brewqueue/kafka/ca.crt
+      - --topic.exclude=^__.*
+    volumes:
+      - ./infra/kafka/secrets/public:/etc/brewqueue/kafka:ro
+    ports: ["9308:9308"]
+    depends_on:
+      kafka-setup: { condition: service_completed_successfully }
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    volumes:
+      - ./infra/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+    ports: ["9090:9090"]
+    depends_on: [kafka-exporter, alertmanager]
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    volumes:
+      - ./infra/monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports: ["9093:9093"]
 
   # ---------------------------------------------------------------- application
   api:
@@ -114,12 +319,18 @@ services:
     environment:
       <<: *dotnet-env
       Cors__Origins__0: http://localhost:3000
+      Kafka__SaslUsername: api
+      Kafka__SaslPassword: ${KAFKA_API_PASSWORD}
+      SchemaRegistry__Username: api
+      SchemaRegistry__Password: ${SR_API_PASSWORD}
     ports: ["5080:8080"]
+    volumes:
+      - ./infra/kafka/secrets/public:/etc/brewqueue/kafka:ro
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
-      kafka: { condition: service_healthy }
+      schema-init: { condition: service_completed_successfully }
     healthcheck:
       # The aspnet image has no curl; bash can open a TCP socket instead.
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080"]
@@ -127,6 +338,7 @@ services:
       timeout: 3s
       retries: 30
     restart: unless-stopped
+    # Try: docker compose up -d --scale api=3   (only one instance publishes the outbox at a time)
 
   kitchen:
     build:
@@ -148,9 +360,14 @@ services:
       args: { PROJECT: BrewQueue.StatsWorker }
     environment:
       <<: *dotnet-env
+      Kafka__SaslUsername: stats
+      Kafka__SaslPassword: ${KAFKA_STATS_PASSWORD}
+    volumes:
+      - ./infra/kafka/secrets/public:/etc/brewqueue/kafka:ro
     depends_on:
       api: { condition: service_healthy }
     restart: unless-stopped
+    # Try: docker compose up -d --scale stats=3   (Kafka gives each instance 2 of the 6 partitions)
 
   web:
     build: ./web
@@ -166,3 +383,6 @@ volumes:
   pgdata:
   rabbitdata:
   seqdata:
+  kafka1data:
+  kafka2data:
+  kafka3data:

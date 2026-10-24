@@ -20,5 +20,6 @@
   <ItemGroup>
     <!-- Lets the integration tests use WebApplicationFactory<Program>. -->
     <InternalsVisibleTo Include="BrewQueue.IntegrationTests" />
+    <InternalsVisibleTo Include="BrewQueue.UnitTests" />
   </ItemGroup>
 </Project>

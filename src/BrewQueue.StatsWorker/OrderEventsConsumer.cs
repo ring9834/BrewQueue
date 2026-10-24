@@ -1,62 +1,86 @@
-using System.Text.Json;
-using BrewQueue.Contracts;
 using BrewQueue.Infrastructure.Messaging;
 using BrewQueue.Infrastructure.Stats;
+using BrewQueue.Contracts;
 using Confluent.Kafka;
 using Microsoft.Extensions.Options;
-using Serilog.Context;
 
 namespace BrewQueue.StatsWorker;
 
 /// <summary>
-/// Reads the order-events topic and updates the stats read model.
+/// The consume loop: fetch a message, let <see cref="OrderEventProcessor"/> decide what to do with
+/// it, then either move past it or rewind and back off.
 ///
-/// <para>Offsets are committed manually AFTER the database update. If the worker crashes in
-/// between, the event is redelivered, and the projector's ProcessedEvents check skips it.
-/// That combination is "effectively once".</para>
-///
-/// <para>Try it: stop this worker, place a few orders, start it again — it catches up from its
-/// last committed offset. Or change the GroupId to rebuild the stats from the beginning.</para>
+/// <list type="bullet">
+/// <item><b>Offsets:</b> stored only after the message is fully handled (applied, duplicate, or
+/// dead-lettered) and committed in the background every few seconds. A crash re-delivers at most
+/// a few seconds of messages, which the projector deduplicates.</item>
+/// <item><b>Transient failures</b> (database down): the processor returns RetryLater, we seek back
+/// to the same offset and wait with exponential backoff. We keep calling Consume() while waiting,
+/// so the worker stays in the group instead of exceeding max.poll.interval.ms and being kicked
+/// out. Lag then grows, and the StatsConsumerStuck alert fires.</item>
+/// <item><b>Rebalancing:</b> cooperative-sticky, so adding or removing a worker only pauses the
+/// partitions that actually move. Optional static membership (Kafka:GroupInstanceId) avoids
+/// rebalances on restarts.</item>
+/// </list>
+/// Scaling: up to 6 instances (one per partition of order-events).
 /// </summary>
 public sealed class OrderEventsConsumer(
-    IServiceScopeFactory scopes,
+    OrderEventProcessor processor,
     IOptions<KafkaOptions> options,
     ILogger<OrderEventsConsumer> logger) : BackgroundService
 {
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private static readonly TimeSpan MinBackoff = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan MaxBackoff = TimeSpan.FromSeconds(30);
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
-        // Consume() is a blocking call, so run the loop on its own thread.
+        // Consume() blocks, so the loop gets its own thread instead of a thread-pool thread.
         Task.Factory.StartNew(() => RunAsync(stoppingToken), stoppingToken,
             TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
 
     private async Task RunAsync(CancellationToken ct)
     {
-        await KafkaTopics.EnsureCreatedAsync(options.Value, logger, ct);
+        var o = options.Value;
+        if (o.ManageTopics) await KafkaTopics.EnsureCreatedAsync(o, logger, ct);
 
-        var config = new ConsumerConfig
+        var config = KafkaClientConfig.Apply(new ConsumerConfig
         {
-            BootstrapServers = options.Value.BootstrapServers,
-            GroupId = options.Value.ConsumerGroupId,
+            GroupId = o.ConsumerGroupId,
+            GroupInstanceId = string.IsNullOrWhiteSpace(o.GroupInstanceId) ? null : o.GroupInstanceId,
             AutoOffsetReset = AutoOffsetReset.Earliest,
-            EnableAutoCommit = false
-        };
+            // We decide *which* offsets are safe (StoreOffset); librdkafka commits them in the background.
+            EnableAutoCommit = true,
+            EnableAutoOffsetStore = false,
+            AutoCommitIntervalMs = 5_000,
+            PartitionAssignmentStrategy = PartitionAssignmentStrategy.CooperativeSticky,
+            IsolationLevel = IsolationLevel.ReadCommitted,
+            SessionTimeoutMs = 45_000,
+            MaxPollIntervalMs = 300_000
+        }, o);
 
-        using var consumer = new ConsumerBuilder<string, string>(config)
-            .SetErrorHandler((_, e) => logger.LogWarning("Kafka consumer error: {Reason}", e.Reason))
+        using var consumer = new ConsumerBuilder<string, byte[]>(config)
+            .SetErrorHandler((_, e) =>
+            {
+                if (e.IsFatal) logger.LogCritical("Fatal Kafka consumer error {Code}: {Reason}", e.Code, e.Reason);
+                else logger.LogWarning("Kafka consumer error {Code}: {Reason}", e.Code, e.Reason);
+            })
             .SetPartitionsAssignedHandler((_, partitions) =>
-                logger.LogInformation("Assigned partitions: {Partitions}", string.Join(", ", partitions.Select(p => p.Partition.Value))))
+                logger.LogInformation("Assigned partitions: {Partitions}", Describe(partitions)))
+            .SetPartitionsRevokedHandler((_, partitions) =>
+                logger.LogInformation("Revoked partitions: {Partitions}", Describe(partitions.Select(p => p.TopicPartition))))
+            .SetPartitionsLostHandler((_, partitions) =>
+                logger.LogWarning("Lost partitions: {Partitions}", Describe(partitions.Select(p => p.TopicPartition))))
             .Build();
 
         consumer.Subscribe(MessagingNames.OrderEventsTopic);
-        logger.LogInformation("Stats worker consuming {Topic} as group {GroupId}",
-            MessagingNames.OrderEventsTopic, config.GroupId);
+        logger.LogInformation("Stats worker consuming {Topic} as group {GroupId} (instance {InstanceId})",
+            MessagingNames.OrderEventsTopic, config.GroupId, config.GroupInstanceId ?? "dynamic");
 
+        var backoff = MinBackoff;
         try
         {
             while (!ct.IsCancellationRequested)
             {
-                ConsumeResult<string, string>? result;
+                ConsumeResult<string, byte[]>? result;
                 try
                 {
                     result = consumer.Consume(ct);
@@ -68,8 +92,20 @@ public sealed class OrderEventsConsumer(
                 }
 
                 if (result?.Message is null) continue;
-                await HandleAsync(result, ct);
-                consumer.Commit(result);
+
+                var outcome = await processor.ProcessAsync(result, ct);
+                if (outcome == ProcessingOutcome.Completed)
+                {
+                    StoreOffset(consumer, result);
+                    backoff = MinBackoff;
+                    continue;
+                }
+
+                // RetryLater: rewind so the next Consume() returns this message again.
+                consumer.Seek(result.TopicPartitionOffset);
+                logger.LogWarning("Pausing {Delay} before retrying {TopicPartitionOffset}", backoff, result.TopicPartitionOffset);
+                await Task.Delay(backoff, ct);
+                backoff = TimeSpan.FromTicks(Math.Min(backoff.Ticks * 2, MaxBackoff.Ticks));
             }
         }
         catch (OperationCanceledException)
@@ -78,47 +114,24 @@ public sealed class OrderEventsConsumer(
         }
         finally
         {
-            consumer.Close(); // leave the group cleanly so partitions are reassigned quickly
+            consumer.Close(); // commits stored offsets and leaves the group cleanly
         }
     }
 
-    private async Task HandleAsync(ConsumeResult<string, string> result, CancellationToken ct)
+    private void StoreOffset(IConsumer<string, byte[]> consumer, ConsumeResult<string, byte[]> result)
     {
-        var correlationId = KafkaTopics.ReadHeader(result.Message.Headers, MessagingNames.CorrelationIdHeader);
-        using var _ = LogContext.PushProperty("CorrelationId", correlationId);
-
-        OrderEvent? evt;
         try
         {
-            evt = JsonSerializer.Deserialize<OrderEvent>(result.Message.Value, Json);
+            consumer.StoreOffset(result);
         }
-        catch (JsonException ex)
+        catch (KafkaException ex) when (ex.Error.Code == ErrorCode.Local_State)
         {
-            // A poison event must not block the partition forever: log it and move on.
-            logger.LogError(ex, "Skipping undeserializable event at {TopicPartitionOffset}", result.TopicPartitionOffset);
-            return;
-        }
-        if (evt is null) return;
-
-        // Retry DB failures in place; we must not commit the offset until the update succeeds.
-        for (var attempt = 1; ; attempt++)
-        {
-            try
-            {
-                using var scope = scopes.CreateScope();
-                var projector = scope.ServiceProvider.GetRequiredService<OrderStatsProjector>();
-                var changed = await projector.ApplyAsync(evt, ct);
-
-                logger.LogInformation("{EventType} for order {OrderId} at {TopicPartitionOffset} (applied: {Applied})",
-                    evt.EventType, evt.OrderId, result.TopicPartitionOffset, changed);
-                return;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                var delay = TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, attempt)));
-                logger.LogWarning(ex, "Projection failed (attempt {Attempt}); retrying in {Delay}", attempt, delay);
-                await Task.Delay(delay, ct);
-            }
+            // The partition was revoked while we processed the message. Its new owner will
+            // re-read it, and the projector skips it as a duplicate. Nothing to do.
+            logger.LogDebug("Partition {Partition} no longer assigned; offset not stored", result.TopicPartition);
         }
     }
+
+    private static string Describe(IEnumerable<TopicPartition> partitions) =>
+        string.Join(", ", partitions.Select(p => p.Partition.Value));
 }

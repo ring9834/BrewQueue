@@ -5,7 +5,7 @@ import type {
   PagedResult,
   PlaceOrderRequest,
   StatsSummary,
-} from '../types/api'
+} from '~/types/api'
 
 export interface PlaceOrderResult {
   order: Order

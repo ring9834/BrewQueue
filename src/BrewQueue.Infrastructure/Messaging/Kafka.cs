@@ -2,97 +2,179 @@ using System.Text;
 using BrewQueue.Contracts;
 using Confluent.Kafka;
 using Confluent.Kafka.Admin;
+using Confluent.SchemaRegistry;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace BrewQueue.Infrastructure.Messaging;
 
+/// <summary>Connection and topic settings shared by every Kafka client in the solution.</summary>
 public sealed class KafkaOptions
 {
     public const string SectionName = "Kafka";
-    public string BootstrapServers { get; set; } = "localhost:9092";
-    public string ConsumerGroupId { get; set; } = "brewqueue-stats";
-    public int OrderEventsPartitions { get; set; } = 3;
+
+    public string BootstrapServers { get; set; } = "localhost:19092,localhost:19093,localhost:19094";
+
+    // ---- security (defaults match the secured docker-compose cluster)
+    public SecurityProtocol SecurityProtocol { get; set; } = SecurityProtocol.SaslSsl;
+    public SaslMechanism SaslMechanism { get; set; } = SaslMechanism.ScramSha512;
+    public string? SaslUsername { get; set; }
+
+    /// <summary>Never put this in appsettings.json: use environment variables, user-secrets or a vault.</summary>
+    public string? SaslPassword { get; set; }
+
+    /// <summary>PEM file of the CA that signed the brokers' certificates.</summary>
+    public string? SslCaLocation { get; set; }
+
+    // ---- consumer
+    public string ConsumerGroupId { get; set; } = MessagingNames.StatsConsumerGroup;
+
+    /// <summary>
+    /// Static group membership. Set a stable, unique id per instance (for example the Kubernetes
+    /// StatefulSet pod name) so a restart within the session timeout doesn't trigger a rebalance.
+    /// Leave empty for dynamic membership.
+    /// </summary>
+    public string? GroupInstanceId { get; set; }
+
+    // ---- topics
+    /// <summary>
+    /// When true, the apps create their topics at startup (tests and single-node dev only).
+    /// In the secured cluster topics are owned by infra/kafka/setup-kafka.sh and the apps' users
+    /// aren't allowed to create topics.
+    /// </summary>
+    public bool ManageTopics { get; set; }
+
+    public int OrderEventsPartitions { get; set; } = 6;
+    public short ReplicationFactor { get; set; } = 3;
+    public int MinInSyncReplicas { get; set; } = 2;
 }
 
-public interface IKafkaProducer
+public sealed class SchemaRegistryOptions
 {
-    Task ProduceAsync(string topic, string key, string type, string jsonValue, string? correlationId, CancellationToken ct);
+    public const string SectionName = "SchemaRegistry";
+
+    public string Url { get; set; } = "https://localhost:8085";
+    public string? Username { get; set; }
+    public string? Password { get; set; }
+    public string? SslCaLocation { get; set; }
+
+    public SchemaRegistryConfig ToConfig()
+    {
+        var config = new SchemaRegistryConfig { Url = Url };
+        if (!string.IsNullOrEmpty(Username))
+        {
+            if (string.IsNullOrEmpty(Password))
+                throw new InvalidOperationException("SchemaRegistry:Password is required when SchemaRegistry:Username is set.");
+
+            config.BasicAuthCredentialsSource = AuthCredentialsSource.UserInfo;
+            config.BasicAuthUserInfo = $"{Username}:{Password}";
+        }
+        if (!string.IsNullOrEmpty(SslCaLocation))
+            config.SslCaLocation = FilePaths.Resolve(SslCaLocation);
+        return config;
+    }
 }
 
-public sealed class KafkaProducer : IKafkaProducer, IDisposable
+public static class KafkaClientConfig
 {
-    private readonly IProducer<string, string> _producer;
-
-    public KafkaProducer(IOptions<KafkaOptions> options, ILogger<KafkaProducer> logger)
+    /// <summary>Applies connection and security settings to any producer/consumer/admin config.</summary>
+    public static T Apply<T>(T config, KafkaOptions options) where T : ClientConfig
     {
-        var config = new ProducerConfig
-        {
-            BootstrapServers = options.Value.BootstrapServers,
-            // Kafka's own idempotent producer: retries can't create duplicates or reorder messages within a partition. (Implies Acks = All.)
-            EnableIdempotence = true,
-            Acks = Acks.All, // Wait for all replicas to acknowledge before considering a message sent.
-            LingerMs = 5, // Batch messages for a few milliseconds to improve throughput.
-            ClientId = AppDomain.CurrentDomain.FriendlyName // For logging and metrics.
-        };
+        config.BootstrapServers = options.BootstrapServers;
+        config.SecurityProtocol = options.SecurityProtocol;
+        config.ClientId = AppDomain.CurrentDomain.FriendlyName;
 
-        _producer = new ProducerBuilder<string, string>(config)
-            .SetErrorHandler((_, e) => logger.LogWarning("Kafka producer error: {Reason}", e.Reason))
-            .Build();
+        if (options.SecurityProtocol is SecurityProtocol.SaslSsl or SecurityProtocol.SaslPlaintext)
+        {
+            if (string.IsNullOrEmpty(options.SaslUsername) || string.IsNullOrEmpty(options.SaslPassword))
+                throw new InvalidOperationException(
+                    "Kafka:SaslUsername and Kafka:SaslPassword are required when Kafka:SecurityProtocol uses SASL.");
+
+            config.SaslMechanism = options.SaslMechanism;
+            config.SaslUsername = options.SaslUsername;
+            config.SaslPassword = options.SaslPassword;
+        }
+
+        if (options.SecurityProtocol is SecurityProtocol.SaslSsl or SecurityProtocol.Ssl)
+        {
+            config.SslCaLocation = FilePaths.Resolve(options.SslCaLocation);
+            // Verify the broker's hostname against its certificate (librdkafka's default, made explicit).
+            config.SslEndpointIdentificationAlgorithm = SslEndpointIdentificationAlgorithm.Https;
+        }
+
+        return config;
     }
 
-    public async Task ProduceAsync(string topic, string key, string type, string jsonValue, string? correlationId, CancellationToken ct)
+    /// <summary>
+    /// Settings for producers whose messages must not be lost or reordered.
+    /// <list type="bullet">
+    /// <item><c>Acks.All</c> + the topics' <c>min.insync.replicas=2</c>: a write is confirmed only
+    /// once at least two brokers have it.</item>
+    /// <item>Idempotence: broker-side retries can't duplicate or reorder messages within a partition
+    /// (it allows up to 5 in-flight requests per connection while keeping order).</item>
+    /// </list>
+    /// </summary>
+    public static ProducerConfig DurableProducer(KafkaOptions options) => Apply(new ProducerConfig
     {
-        // type is used by consumers to deserialize the message.
-        // Why use Encoding.UTF8.GetBytes? Because Kafka headers are byte arrays, and we want to store the type as a UTF-8 encoded string in the header. 
-        // { MessagingNames.MessageTypeHeader, Encoding.UTF8.GetBytes(type) } is creating a header with the name "x-message-type" and the value being the UTF-8 encoded bytes of the type string. This allows consumers to read the message type from the header and deserialize the message accordingly.
-        var headers = new Headers { { MessagingNames.MessageTypeHeader, Encoding.UTF8.GetBytes(type) } }; 
-        if (correlationId is not null)
-            headers.Add(MessagingNames.CorrelationIdHeader, Encoding.UTF8.GetBytes(correlationId));
+        Acks = Acks.All,
+        EnableIdempotence = true,
+        MaxInFlight = 5,
+        CompressionType = CompressionType.Zstd,
+        LingerMs = 10,
+        // Give up on a message after 2 minutes; the outbox keeps it and tries again later.
+        MessageTimeoutMs = 120_000
+    }, options);
+}
 
-        // Same key (order id) => same partition => per-order ordering is preserved.
-        await _producer.ProduceAsync(topic, new Message<string, string>
+public static class FilePaths
+{
+    /// <summary>
+    /// Resolves a relative path (such as "infra/kafka/secrets/public/ca.crt" in appsettings) by
+    /// looking in the current directory and its parents, so it works whether you start the app
+    /// from the repository root, the project folder or the IDE.
+    /// </summary>
+    public static string? Resolve(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || Path.IsPathRooted(path)) return path;
+
+        for (var dir = new DirectoryInfo(Directory.GetCurrentDirectory()); dir is not null; dir = dir.Parent)
         {
-            Key = key,
-            Value = jsonValue,
-            Headers = headers
-        }, ct);
-    }
-
-    public void Dispose()
-    {
-        _producer.Flush(TimeSpan.FromSeconds(5)); // Wait for any in-flight messages to be sent before disposing.
-        _producer.Dispose();
+            var candidate = Path.Combine(dir.FullName, path);
+            if (File.Exists(candidate)) return candidate;
+        }
+        return path; // let the client report a clear "file not found"
     }
 }
 
 public static class KafkaTopics
 {
     /// <summary>
-    /// Creates the topic with an explicit partition count (instead of relying on auto-create).
+    /// Creates the order-events topic and its dead-letter topic, for tests and single-node dev
+    /// (<see cref="KafkaOptions.ManageTopics"/>). Retries while the broker is starting.
     /// </summary>
     public static async Task EnsureCreatedAsync(KafkaOptions options, ILogger logger, CancellationToken ct)
     {
-        using var admin = new AdminClientBuilder(new AdminClientConfig { BootstrapServers = options.BootstrapServers })
-            .Build();
+        using var admin = new AdminClientBuilder(KafkaClientConfig.Apply(new AdminClientConfig(), options)).Build();
+
+        var topicConfig = new Dictionary<string, string>
+        {
+            ["min.insync.replicas"] = options.MinInSyncReplicas.ToString()
+        };
+        TopicSpecification[] topics =
+        [
+            new() { Name = MessagingNames.OrderEventsTopic, NumPartitions = options.OrderEventsPartitions, ReplicationFactor = options.ReplicationFactor, Configs = topicConfig },
+            new() { Name = MessagingNames.OrderEventsDeadLetterTopic, NumPartitions = options.OrderEventsPartitions, ReplicationFactor = options.ReplicationFactor, Configs = topicConfig }
+        ];
 
         for (var attempt = 1; ; attempt++)
         {
             try
             {
-                await admin.CreateTopicsAsync(
-                [
-                    new TopicSpecification
-                    {
-                        Name = MessagingNames.OrderEventsTopic,
-                        NumPartitions = options.OrderEventsPartitions,
-                        ReplicationFactor = 1
-                    }
-                ]);
-                logger.LogInformation("Created Kafka topic {Topic}", MessagingNames.OrderEventsTopic);
+                await admin.CreateTopicsAsync(topics);
+                logger.LogInformation("Created Kafka topics {Topics}", string.Join(", ", topics.Select(t => t.Name)));
                 return;
             }
-            catch (CreateTopicsException ex) when (ex.Results.All(r => r.Error.Code == ErrorCode.TopicAlreadyExists))
+            catch (CreateTopicsException ex) when (ex.Results.All(r => r.Error.Code is ErrorCode.NoError or ErrorCode.TopicAlreadyExists))
             {
                 return;
             }

@@ -1,0 +1,82 @@
+# Prometheus alert rules for the Kafka part of BrewQueue.
+# Metrics come from kafka-exporter (https://github.com/danielqsj/kafka_exporter).
+# Validate with: promtool check rules infra/monitoring/alerts.yml
+
+groups:
+  - name: kafka-cluster
+    rules:
+      - alert: KafkaBrokerDown
+        expr: kafka_brokers < 3
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Only {{ $value }} of 3 Kafka brokers are reachable"
+          description: >-
+            The cluster still accepts writes while at least 2 replicas are in sync
+            (min.insync.replicas=2), but one more failure stops all producers.
+
+      - alert: KafkaPartitionBelowMinIsr
+        expr: min by (topic, partition) (kafka_topic_partition_in_sync_replica{topic!~"__.*"}) < 2
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.topic }}/{{ $labels.partition }} has fewer than 2 in-sync replicas"
+          description: >-
+            Producers using acks=all (all BrewQueue producers) are being rejected for this
+            partition. Writes stay in the outbox until replicas catch up.
+
+      - alert: KafkaUnderReplicatedPartitions
+        expr: sum by (topic) (kafka_topic_partition_under_replicated_partition) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} under-replicated partition(s) in {{ $labels.topic }}"
+          description: "A replica has fallen behind or its broker is down. Data is at risk if another broker fails."
+
+      - alert: KafkaExporterDown
+        expr: up{job="kafka-exporter"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "kafka-exporter is down: Kafka alerts below are blind"
+
+  - name: brewqueue-consumers
+    rules:
+      # The stats worker is behind, but still moving.
+      - alert: StatsConsumerLagHigh
+        expr: sum(kafka_consumergroup_lag_sum{consumergroup="brewqueue-stats", topic="order-events"}) > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Stats worker is {{ $value }} events behind"
+          description: "Stats are stale. Check whether the worker is overloaded or the database is slow."
+
+      # Events are waiting but the committed offset hasn't moved (over the last 10 minutes,
+      # sustained for 5): the worker is stuck, for example retrying a database outage, or not running.
+      - alert: StatsConsumerStuck
+        expr: >-
+          sum(kafka_consumergroup_lag_sum{consumergroup="brewqueue-stats", topic="order-events"}) > 0
+          and
+          sum(delta(kafka_consumergroup_current_offset_sum{consumergroup="brewqueue-stats", topic="order-events"}[10m])) == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Stats worker is stuck: {{ $value }} events waiting, no progress"
+          description: "Check the stats worker logs (Seq) for repeated 'Transient failure' warnings."
+
+      # Anything arriving in the dead-letter topic needs a human.
+      - alert: OrderEventsDeadLettered
+        expr: sum(increase(kafka_topic_partition_current_offset{topic="order-events.dlt"}[10m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value | printf \"%.0f\" }} order event(s) dead-lettered in the last 10 minutes"
+          description: >-
+            Open order-events.dlt in Kafka UI. The dlt-reason and dlt-error headers say why each
+            message failed. Fix the cause, then replay (see README, "Replaying dead letters").

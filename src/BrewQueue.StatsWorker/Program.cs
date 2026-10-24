@@ -11,11 +11,13 @@ builder.Services.AddSerilog((services, lc) => lc
     .Enrich.FromLogContext()
     .Enrich.WithProperty("Service", "stats"));
 
+builder.Services.AddSingleton(TimeProvider.System);
 builder.Services
     .AddPersistence(builder.Configuration)
-    .AddKafka(builder.Configuration);
+    .AddKafkaConsumer(builder.Configuration);
 
 builder.Services.AddHostedService<OrderEventsConsumer>();
+builder.Services.AddHostedService<ProcessedEventsCleanup>();
 
 var host = builder.Build();
 

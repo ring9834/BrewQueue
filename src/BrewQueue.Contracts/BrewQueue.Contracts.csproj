@@ -1,3 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Message contracts shared between the API and the workers. No dependencies on purpose. -->
+  <!--
+    Message contracts shared between the API and the workers.
+    Protos/order_event.proto is compiled to C# at build time by Grpc.Tools (no generated code is
+    committed). The same .proto file is registered in Schema Registry by
+    infra/schema-registry/register_schemas.py, so there is exactly one source of truth.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" />
+    <PackageReference Include="Grpc.Tools">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+  <ItemGroup>
+    <Protobuf Include="Protos\order_event.proto" GrpcServices="None" />
+  </ItemGroup>
 </Project>

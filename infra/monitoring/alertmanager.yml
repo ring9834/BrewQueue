@@ -1,0 +1,21 @@
+# Alertmanager routing. Locally, alerts are only visible in the UI (http://localhost:9093).
+# In production, point the receiver at your on-call tooling. Examples (fill in and uncomment):
+#
+#   receivers:
+#     - name: oncall
+#       slack_configs:
+#         - api_url_file: /etc/alertmanager/secrets/slack-webhook-url
+#           channel: "#brewqueue-alerts"
+#           send_resolved: true
+#       pagerduty_configs:
+#         - routing_key_file: /etc/alertmanager/secrets/pagerduty-key
+
+route:
+  receiver: local-ui-only
+  group_by: [alertname, topic]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: local-ui-only

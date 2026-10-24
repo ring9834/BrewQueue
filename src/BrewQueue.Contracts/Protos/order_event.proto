@@ -1,0 +1,56 @@
+// Wire contract for the "order-events" Kafka topic (Schema Registry subject "order-events-value").
+//
+// Evolution rules (enforced by Schema Registry with BACKWARD_TRANSITIVE compatibility):
+//   - Never change a field's number or type. The number is what's on the wire, not the name.
+//   - Never reuse a number. When removing a field, add it to `reserved` (both number and name).
+//   - Adding a field is safe: old readers ignore it, new readers see the default for old data.
+//   - Renaming a field doesn't change the bytes, so it doesn't break consumers of the binary
+//     format. Rename only if you also accept the change in generated code.
+//   - Keep OrderEvent the FIRST message in this file. The serializer refers to the message
+//     type by its position in the registered schema.
+//
+// Before changing this file, run: python3 infra/schema-registry/register_schemas.py --check-only
+syntax = "proto3";
+
+package brewqueue.orders.v1;
+
+option csharp_namespace = "BrewQueue.Contracts.Events.V1";
+
+// One fact about one order. Consumers must be idempotent: deduplicate on event_id.
+message OrderEvent {
+  // UUID of this event (not of the order). Unique per occurrence.
+  string event_id = 1;
+  OrderEventType event_type = 2;
+  // UUID of the order. Also the Kafka message key, so one order's events stay in order.
+  string order_id = 3;
+  OrderStatus status = 4;
+  // ORDER_STATUS_UNSPECIFIED for OrderPlaced.
+  OrderStatus previous_status = 5;
+  // Money in minor units (cents) to avoid floating-point rounding. Currency is NZD.
+  int64 total_cents = 6;
+  repeated OrderLine lines = 7;
+  // When it happened, in milliseconds since the Unix epoch (UTC).
+  int64 occurred_at_unix_ms = 8;
+}
+
+message OrderLine {
+  int32 menu_item_id = 1;
+  string name = 2;
+  int32 quantity = 3;
+  int64 unit_price_cents = 4;
+}
+
+enum OrderEventType {
+  ORDER_EVENT_TYPE_UNSPECIFIED = 0;
+  ORDER_EVENT_TYPE_PLACED = 1;
+  ORDER_EVENT_TYPE_STATUS_CHANGED = 2;
+}
+
+enum OrderStatus {
+  ORDER_STATUS_UNSPECIFIED = 0;
+  ORDER_STATUS_RECEIVED = 1;
+  ORDER_STATUS_PREPARING = 2;
+  ORDER_STATUS_READY = 3;
+  ORDER_STATUS_COLLECTED = 4;
+  ORDER_STATUS_CANCELLED = 5;
+}

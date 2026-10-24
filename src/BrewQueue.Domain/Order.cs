@@ -9,9 +9,7 @@ public enum OrderStatus
     Cancelled
 }
 
-/// <summary>
-/// The allowed status transitions, as a single source of truth.
-/// </summary>
+/// <summary>The allowed status transitions, as a single source of truth.</summary>
 public static class OrderStatusRules
 {
     private static readonly Dictionary<OrderStatus, OrderStatus[]> Allowed = new()
@@ -28,13 +26,13 @@ public static class OrderStatusRules
     public static bool IsTerminal(OrderStatus status) => Allowed[status].Length == 0;
 }
 
-/// <summary>
-/// Order aggregate root. All state changes go through its methods.
-/// </summary>
+/// <summary>Order aggregate root. All state changes go through its methods.</summary>
 public sealed class Order
 {
-    private Order() { } // EF Core
     private readonly List<OrderLine> _lines = [];
+
+    private Order() { } // EF Core
+
     public Guid Id { get; private set; }
     public string CustomerName { get; private set; } = "";
     public OrderStatus Status { get; private set; }
@@ -43,9 +41,7 @@ public sealed class Order
     public IReadOnlyList<OrderLine> Lines => _lines;
     public decimal Total => _lines.Sum(l => l.LineTotal);
 
-    /// <summary>
-    /// Concurrency token, mapped to PostgreSQL's xmin system column.
-    /// </summary>
+    /// <summary>Concurrency token, mapped to PostgreSQL's xmin system column.</summary>
     public uint Version { get; private set; }
 
     public static Order Place(string customerName, IEnumerable<OrderLine> lines, DateTimeOffset now)
@@ -113,9 +109,7 @@ public sealed class OrderLine
     public int Id { get; private set; }
     public int MenuItemId { get; private set; }
 
-    /// <summary>
-    /// Name and price are snapshotted so later menu changes don't rewrite history.
-    /// </summary>
+    /// <summary>Name and price are snapshotted so later menu changes don't rewrite history.</summary>
     public string Name { get; private set; } = "";
     public decimal UnitPrice { get; private set; }
     public int Quantity { get; private set; }

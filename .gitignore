@@ -11,4 +11,9 @@ web/.output/
 web/dist/
 web/.data/
 
+# Secrets: never commit these.
 .env
+infra/kafka/secrets/*
+!infra/kafka/secrets/.gitkeep
+infra/kafka/secrets/public/*
+!infra/kafka/secrets/public/.gitkeep

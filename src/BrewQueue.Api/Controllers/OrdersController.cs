@@ -23,20 +23,19 @@ public sealed class OrdersController(OrderService orders) : ControllerBase
     /// <param name="request">The order to place.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost]
-    [Idempotent] // It runs after model binding and validation, and before and after the action itself. 'action' here means the PlaceOrder method below. 
+    [Idempotent]
     [ProducesResponseType<OrderDto>(StatusCodes.Status201Created)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest, "application/problem+json")]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict, "application/problem+json")]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status422UnprocessableEntity, "application/problem+json")]
     public async Task<ActionResult<OrderDto>> PlaceOrder(
-        [FromHeader(Name = IdempotencyFilter.HeaderName), Required] Guid? idempotencyKey, // A missing key, or one that isn’t a UUID, gets a 400 ValidationProblemDetails from [ApiController]’s automatic validation, before the filter even runs. The filter checks again as a safety net.
+        [FromHeader(Name = IdempotencyFilter.HeaderName), Required] Guid? idempotencyKey,
         [FromBody] PlaceOrderRequest request,
         CancellationToken ct)
     {
         var order = await orders.PlaceAsync(request, ct);
         // Created(...) (rather than CreatedAtAction) gives the idempotency filter a concrete Location to store.
-        // This ensures that subsequent retries with the same idempotency key return the same response.
-        return Created($"/api/orders/{order.Id}", order); // 201 Created, with Location header and the order in the body.
+        return Created($"/api/orders/{order.Id}", order);
     }
 
     /// <summary>Gets one order.</summary>

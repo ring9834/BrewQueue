@@ -22,5 +22,7 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The tests register this exact file in Schema Registry, like register_schemas.py does. -->
+    <None Include="..\..\src\BrewQueue.Contracts\Protos\order_event.proto" Link="Schemas\order_event.proto" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

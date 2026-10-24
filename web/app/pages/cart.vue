@@ -31,7 +31,7 @@ async function submit() {
       ? 'We had already received this order, so we did not charge you twice.'
       : `Thanks ${order.customerName}! We'll call your name.`,
   })
-  await navigateTo(`/orders/${order.id}`) // navigate to the order page after placing the order
+  await navigateTo(`/orders/${order.id}`)
 }
 </script>
 

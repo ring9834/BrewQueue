@@ -48,19 +48,23 @@ builder.Services
     .AddPersistence(builder.Configuration)
     .AddRedisIdempotency(builder.Configuration)
     .AddRabbitMq(builder.Configuration)
-    .AddKafka(builder.Configuration);
+    .AddKafkaProducer(builder.Configuration);
 
 // ---------- Application services ----------
 builder.Services.AddScoped<OrderService>();
 builder.Services.AddScoped<StatsService>();
+builder.Services.Configure<OutboxOptions>(builder.Configuration.GetSection(OutboxOptions.SectionName));
 builder.Services.AddSingleton<OutboxPublisher>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<OutboxPublisher>());
 
 // ---------- Health checks ----------
+builder.Services.AddSingleton<KafkaHealthCheck>(); // singleton: it owns a Kafka admin client
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<BrewQueueDbContext>("postgres", tags: ["ready"])
     .AddCheck<RedisHealthCheck>("redis", tags: ["ready"])
-    .AddCheck<RabbitMqHealthCheck>("rabbitmq", tags: ["ready"]);
+    .AddCheck<RabbitMqHealthCheck>("rabbitmq", tags: ["ready"])
+    .AddCheck<KafkaHealthCheck>("kafka", tags: ["ready"])
+    .AddCheck<OutboxHealthCheck>("outbox", tags: ["ready"]);
 
 // ---------- CORS for the Nuxt dev server ----------
 const string CorsPolicy = "web";
@@ -69,7 +73,6 @@ builder.Services.AddCors(o => o.AddPolicy(CorsPolicy, p => p
     .AllowAnyHeader()
     .AllowAnyMethod()
     .WithExposedHeaders("Location", IdempotencyFilter.ReplayedHeader, CorrelationIdMiddleware.HeaderName)));
-// allow the Nuxt dev server to read the Location header for redirects. For the browser to read that header at all, the API’s CORS policy lists it in WithExposedHeaders.
 
 var app = builder.Build();
 

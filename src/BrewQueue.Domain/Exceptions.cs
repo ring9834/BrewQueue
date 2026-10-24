@@ -16,9 +16,7 @@ public sealed class InvalidStatusTransitionException(OrderStatus from, OrderStat
     public OrderStatus To { get; } = to;
 }
 
-/// <summary>
-/// Maps to 404 Not Found.
-/// </summary>
+/// <summary>Maps to 404 Not Found.</summary>
 public sealed class NotFoundException(string resource, object key)
     : Exception($"{resource} '{key}' was not found.")
 {
@@ -26,7 +24,5 @@ public sealed class NotFoundException(string resource, object key)
     public object Key { get; } = key;
 }
 
-/// <summary>
-/// Maps to 409 Conflict (like optimistic concurrency failures).
-/// </summary>
+/// <summary>Maps to 409 Conflict (e.g. optimistic concurrency failures).</summary>
 public sealed class ConflictException(string message) : Exception(message);

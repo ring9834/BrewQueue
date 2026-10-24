@@ -109,9 +109,7 @@ public interface IRabbitMqPublisher
         string? correlationId, int retryCount = 0, CancellationToken ct = default);
 }
 
-/// <summary>
-/// Publishes with publisher confirms, so a completed call means the broker has the message.
-/// </summary>
+/// <summary>Publishes with publisher confirms, so a completed call means the broker has the message.</summary>
 public sealed class RabbitMqPublisher(RabbitMqConnection connection) : IRabbitMqPublisher, IAsyncDisposable
 {
     private readonly SemaphoreSlim _lock = new(1, 1); // channels are not thread-safe for publishing
