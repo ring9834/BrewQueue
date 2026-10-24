@@ -9,7 +9,7 @@ A small café ordering system built to practise a modern full stack: customers o
 | Idempotency | Redis (`Idempotency-Key` header on `POST /api/orders`) |
 | Messaging | Transactional outbox → **RabbitMQ** (kitchen work queue, retries, DLQ) and **Kafka** (order event stream) |
 | Kafka in production shape | 3 brokers (RF 3, `min.insync.replicas=2`), TLS + SASL/SCRAM + ACLs, Schema Registry (Protobuf, `BACKWARD_TRANSITIVE`), dead-letter topic, Prometheus lag/DLT alerts. See [docs/kafka-production.md](docs/kafka-production.md) |
-| Workers | Kitchen worker (RabbitMQ consumer), Stats worker (Kafka consumer → read model) |
+| Workers | Kitchen worker (RabbitMQ consumer), Stats worker (Kafka consumer → read model). See [Messaging workflow](docs/messaging-workflow.md)|
 | Frontend | Nuxt 4, Vue 3, TypeScript, **Pinia** (client state), **Nuxt Query / TanStack Vue Query** (server state) |
 | Tests | xUnit unit tests; integration tests with **Testcontainers** (Postgres, Redis, RabbitMQ, Kafka, Schema Registry); `promtool` tests for the alert rules |
 | Local deployment | Docker Compose |
