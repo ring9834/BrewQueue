@@ -15,7 +15,7 @@ A small café ordering system built to practise a modern full stack: customers o
 | Local deployment | Docker Compose |
 
 <P align="center">
- <img width="2720" height="3160" alt="brewqueue_architecture_production_kafka" src="https://github.com/user-attachments/assets/006335cb-24c7-4c52-8bc6-ba061fd84e6e" />
+ <img width="544" height="632" alt="brewqueue_architecture_production_kafka" src="https://github.com/user-attachments/assets/006335cb-24c7-4c52-8bc6-ba061fd84e6e" />
 </P>
 
 ---
