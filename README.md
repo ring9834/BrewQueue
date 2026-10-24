@@ -14,21 +14,9 @@ A small café ordering system built to practise a modern full stack: customers o
 | Tests | xUnit unit tests; integration tests with **Testcontainers** (Postgres, Redis, RabbitMQ, Kafka, Schema Registry); `promtool` tests for the alert rules |
 | Local deployment | Docker Compose |
 
-```
- Browser ──► Nuxt (SSR + SPA)
-              │  Pinia: cart, my order ids, board prefs, toasts
-              │  Vue Query: menu, orders, board, stats
-              ▼
-          BrewQueue.Api ──────────────► PostgreSQL  (orders, outbox, stats read model)
-           │ Idempotency filter ──────► Redis
-           │ OutboxPublisher (bg)
-           ├─► RabbitMQ  kitchen.orders ──► KitchenWorker ──PATCH status──► Api
-           │             └─ DLX ─► kitchen.orders.dlq
-           └─► Kafka     order-events (key = orderId, Protobuf) ──► StatsWorker ──► stats tables
-                 │  3 brokers · TLS · SCRAM · ACLs        │
-                 └─ Schema Registry (contract checks)     └─ failures ─► order-events.dlt
-                    kafka-exporter ─► Prometheus ─► Alertmanager (lag, DLT, broker/ISR alerts)
-```
+<P align="center">
+ <img width="2720" height="3160" alt="brewqueue_architecture_production_kafka" src="https://github.com/user-attachments/assets/006335cb-24c7-4c52-8bc6-ba061fd84e6e" />
+</P>
 
 ---
 
