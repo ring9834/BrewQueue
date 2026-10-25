@@ -79,7 +79,7 @@ promtool test rules infra/monitoring/alerts.test.yml   # alert rules (promtool s
 
 ---
 
-## What to look at (the learning tour)
+## What to look at
 
 ### 1. Pinia vs Vue Query: who owns which state
 - **Server state** (menu, orders, stats) lives only in Vue Query: `web/app/composables/queries.ts`. It handles caching, polling (`refetchInterval`), invalidation and optimistic updates.
