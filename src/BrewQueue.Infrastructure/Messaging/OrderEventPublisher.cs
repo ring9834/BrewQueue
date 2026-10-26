@@ -69,6 +69,9 @@ public sealed class KafkaOrderEventPublisher : IOrderEventPublisher, IDisposable
             new SerializationContext(MessageComponentType.Value, MessagingNames.OrderEventsTopic, headers));
 
         // Key = order id: every event of one order goes to the same partition, in order.
+        // puts the message into librdkafka’s in-memory send queue and returns immediately. 
+        // librdkafka is the native client library that does the real network work. 
+        // The Task it returns completes when the brokers acknowledge the message (acks=all, so all in-sync replicas have it), or fails with a ProduceException.
         return _producer.ProduceAsync(MessagingNames.OrderEventsTopic, new Message<string, byte[]>
         {
             Key = evt.OrderId.ToString(),

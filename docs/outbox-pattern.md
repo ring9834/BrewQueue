@@ -276,8 +276,11 @@ systems:
 |---|---|---|
 | …before `COMMIT` of the business transaction | Nothing committed | Nothing to publish (the client sees an error and can retry with its Idempotency-Key) |
 | …after `COMMIT`, before the publisher runs | Rows wait in the outbox | Published on the next cycle, by this or another instance |
-| …after the broker acked, before `ProcessedAt` is saved | Message is in the broker, row still unpublished | **Published again.** Consumers see a duplicate. |
-| …mid-batch | Transaction rolls back, lock released | Whole batch re-sent by the next lock holder |
+| …during a publishing cycle, before its `COMMIT` | `ProcessedAt` is set in memory as acks arrive, but only saved by the batch's one `SaveChanges` + `COMMIT`. The transaction rolls back and the lock is released. Messages the broker already received stay there, and their rows stay unpublished. | The **whole batch** is re-sent by the next lock holder. Consumers see duplicates of every message the broker had already received. |
+
+A failure that isn't a crash has the same effect on a smaller scale: if the broker accepted a message
+but the publisher never saw the ack (a timeout or dropped connection), or an earlier row in the batch
+failed (the prefix rule, step 6.4), that row stays unpublished and is sent again next cycle.
 
 So **every consumer must be idempotent**, and in BrewQueue they are:
 - **Stats worker:** records each `EventId` in `processed_events`, in the same transaction as the
