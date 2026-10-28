@@ -319,7 +319,7 @@ items sold, orders collected), and addition doesn't care about order. A consumer
   this)
 - don't dead-letter for that consumer at all
 
-**RabbitMQ.** The kitchen queue makes no ordering promise to begin with: with prefetch 10, several
+**RabbitMQ.** The kitchen queue makes no ordering promise to begin with: with prefetch 5 and 4 parallel handlers per worker, several
 consumers and re-published retries, commands already run out of order. Each command is about a
 different order, so nothing depends on it.
 
@@ -371,7 +371,7 @@ sequenceDiagram
 | **RabbitMQ's dead-lettering from quorum queues is at-most-once by default** | If the DLQ can't accept a message at that moment, it can be dropped. | Declare `kitchen.orders` with `x-dead-letter-strategy: at-least-once` and `x-overflow: reject-publish` (and make the DLQ a quorum queue too). Changing queue arguments means deleting and recreating the queue. |
 | **Late kitchen redelivery is wrongly dead-lettered** | If the kitchen crashes after setting `Ready` but before acking, the redelivery fails with `Ready → Preparing` (`422`) and goes to the DLQ, even though the work was done. | Skip steps the order is already past (see [idempotency.md](idempotency.md), step 6). |
 | **The DLT can't be emptied message by message** | After a replay, the replayed copies stay in the DLT until retention expires, and could be replayed again by mistake. | Harmless thanks to `EventId` deduplication. For tidiness, record the last replayed offset, or use `kafka-delete-records.sh` up to an offset. |
-| **Kitchen backoff holds a prefetch slot** | While a worker waits 1–4 s before re-publishing, that message occupies one of its 10 prefetch slots. | Fine at this scale. At high volume, use delayed retry queues (a TTL queue that dead-letters back to the work queue) instead of `Task.Delay`. |
+| **Kitchen backoff holds a prefetch slot** | While a worker waits 1–4 s before re-publishing, that message occupies one of its 5 prefetch slots. | Fine at this scale. At high volume, use delayed retry queues (a TTL queue that dead-letters back to the work queue) instead of `Task.Delay`. |
 
 ---
 
