@@ -246,7 +246,7 @@ already safe to repeat (see [idempotency.md](idempotency.md), step 4.4).
 
 | Situation | Choice |
 |---|---|
-| **This project (learning)** | **Keep RabbitMQ.** The split shows commands vs events, queue vs log, broker-side vs consumer-side dead-lettering. Merging them hides exactly what the project is there to teach. |
+| **This project** | **Keep RabbitMQ.** The split shows commands vs events, queue vs log, broker-side vs consumer-side dead-lettering. |
 | A small production system that wants one fewer broker | **Design B**, with the kitchen made non-blocking (a person or a timer sets `Ready`, and the worker doesn't hold the message) |
 | Lots of slow, independent jobs (image processing, emails, payments) | **A real queue**: RabbitMQ, or a cloud queue (SQS, Azure Service Bus) |
 | Already all-in on Kafka, on Kafka 4.2+ with a client that supports share groups | **Design C** |

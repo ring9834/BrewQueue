@@ -10,6 +10,7 @@ A small café ordering system built to practise a modern full stack: customers o
 | Messaging | Transactional outbox -> **RabbitMQ** (kitchen work queue, retries, DLQ) and **Kafka** (order event stream). See [Messaging workflow](docs/messaging-workflow.md) and [Messaging Contract Management](docs/schema-registry.md)|
 | Kafka in production shape | 3 brokers (RF 3, `min.insync.replicas=2`), TLS + SASL/SCRAM + ACLs, Schema Registry (Protobuf, `BACKWARD_TRANSITIVE`), dead-letter topic, Prometheus lag/DLT alerts. See [docs/kafka-production.md](docs/kafka-production.md) |
 | Workers | Kitchen worker (RabbitMQ consumer), Stats worker (Kafka consumer -> read model)|
+| Workers | Kitchen worker (RabbitMQ consumer), Stats worker (Kafka consumer -> read model)|
 | Frontend | Nuxt 4, Vue 3, TypeScript, **Pinia** (client state), **Nuxt Query / TanStack Vue Query** (server state) |
 | Tests | xUnit unit tests; integration tests with **Testcontainers** (Postgres, Redis, RabbitMQ, Kafka, Schema Registry); `promtool` tests for the alert rules |
 | Local deployment | Docker Compose |
@@ -90,6 +91,8 @@ promtool test rules infra/monitoring/alerts.test.yml   # alert rules (promtool s
 - The barista board (`pages/barista.vue`) moves cards **optimistically** and rolls back on failure.
 
 ### 2. Idempotency with Redis
+- `[Idempotent]` on `OrdersController.PlaceOrder` -> `CrossCutting/IdempotencyFilter.cs`.
+- Redis `SET NX` claims the key atomically. Outcomes: first request -> proceed; same key + same body -> stored response replayed with `Idempotent-Replayed: true`; still running -> 409; same key + different body -> 422.
 - `[Idempotent]` on `OrdersController.PlaceOrder` -> `CrossCutting/IdempotencyFilter.cs`.
 - Redis `SET NX` claims the key atomically. Outcomes: first request -> proceed; same key + same body -> stored response replayed with `Idempotent-Replayed: true`; still running -> 409; same key + different body -> 422.
 - The cart store (`stores/cart.ts`) keeps one key per checkout attempt, so retrying after a network error can't create a second order.
