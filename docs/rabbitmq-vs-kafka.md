@@ -33,7 +33,7 @@ flowchart TD
     k2["Kitchen worker 2"]:::code
     k3["Kitchen worker 3"]:::code
     dlq["kitchen.orders.dlq"]:::bad
-    status["PATCH /api/orders/{id}/status<br/>Preparing → Ready"]:::code
+    status["PATCH /api/orders/{id}/status<br/>Preparing -> Ready"]:::code
 
     api -- "PrepareOrderCommand row" --> outbox --> pub
     pub -- "order.prepare" --> ex --> q
@@ -65,7 +65,7 @@ The kitchen worker's settings (`KitchenConsumer.cs`, `RabbitMqOptions`):
 | `ConsumerDispatchConcurrency` | 4 | Each worker prepares up to 4 orders in parallel |
 | Queue type | quorum | Replicated and durable; dead-letters after 20 redeliveries |
 | Retries | re-publish with `x-retry-count`, 1 s / 2 s / 4 s | Transient failures retry without blocking anything else |
-| Dead letters | `x-dead-letter-exchange` → `kitchen.orders.dlq` | The broker moves rejected messages itself |
+| Dead letters | `x-dead-letter-exchange` -> `kitchen.orders.dlq` | The broker moves rejected messages itself |
 
 To scale it, run `docker compose up -d --scale kitchen=3`. RabbitMQ spreads orders across all
 workers, with no setup and no upper limit.
@@ -246,7 +246,7 @@ already safe to repeat (see [idempotency.md](idempotency.md), step 4.4).
 
 | Situation | Choice |
 |---|---|
-| **This project** | **Keep RabbitMQ.** The split shows commands vs events, queue vs log, broker-side vs consumer-side dead-lettering. |
+| **This project (learning)** | **Keep RabbitMQ.** The split shows commands vs events, queue vs log, broker-side vs consumer-side dead-lettering. Merging them hides exactly what the project is there to teach. |
 | A small production system that wants one fewer broker | **Design B**, with the kitchen made non-blocking (a person or a timer sets `Ready`, and the worker doesn't hold the message) |
 | Lots of slow, independent jobs (image processing, emails, payments) | **A real queue**: RabbitMQ, or a cloud queue (SQS, Azure Service Bus) |
 | Already all-in on Kafka, on Kafka 4.2+ with a client that supports share groups | **Design C** |
