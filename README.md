@@ -163,6 +163,6 @@ docker-compose.yml
 ## Ideas to extend it
 
 - Replace polling with Server-Sent Events or SignalR for the board and order page.
-- Add OpenTelemetry tracing across API → outbox → RabbitMQ → worker → API.
-- Run the kitchen consumer inside the integration tests and assert the full Received → Ready flow.
+- Add OpenTelemetry tracing across API -> outbox -> RabbitMQ -> worker → API.
+- Run the kitchen consumer inside the integration tests and assert the full Received -> Ready flow.
 - Swap Vue Query for Pinia Colada on one page and compare.
