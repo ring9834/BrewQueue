@@ -138,7 +138,7 @@ sequenceDiagram
     participant C as Browser
     participant F as IdempotencyFilter
     participant R as Redis
-    participant A as PlaceOrder → OrderService
+    participant A as PlaceOrder -> OrderService
     participant DB as PostgreSQL
 
     C->>F: POST /api/orders<br/>Idempotency-Key: K
@@ -179,8 +179,8 @@ returns `409` rather than risking a second execution.
 stateDiagram-v2
     [*] --> Processing: SET NX (claim), TTL 30 s
     Processing --> Completed: action returned 2xx<br/>(overwrite, TTL 24 h)
-    Processing --> [*]: action failed → DEL<br/>(client may retry with same key)
-    Processing --> [*]: server crashed → TTL expires after 30 s
+    Processing --> [*]: action failed -> DEL<br/>(client may retry with same key)
+    Processing --> [*]: server crashed -> TTL expires after 30 s
     Completed --> [*]: TTL expires after 24 h
 ```
 
@@ -194,7 +194,7 @@ stateDiagram-v2
 
 ### 2.6 Settings
 
-`appsettings.json` → `Idempotency` (`IdempotencyOptions`):
+`appsettings.json` -> `Idempotency` (`IdempotencyOptions`):
 
 | Setting | Default | Effect |
 |---|---|---|
@@ -212,7 +212,7 @@ public bool ChangeStatus(OrderStatus next, DateTimeOffset now)
 {
     if (Status == next) return false;                 // already there: no-op
     if (!OrderStatusRules.CanTransition(Status, next))
-        throw new InvalidStatusTransitionException(Status, next);   // → 422
+        throw new InvalidStatusTransitionException(Status, next);   // -> 422
     Status = next;
     UpdatedAt = now;
     return true;
@@ -224,7 +224,7 @@ writing an outbox row**. A repeated PATCH therefore changes nothing, and emits n
 `OrderStatusChanged` event either.
 
 Two concurrent PATCHes on the same order are separated by the `xmin` concurrency token: one wins,
-the other gets `409` (`DbUpdateConcurrencyException` → `ConflictException`). Retrying the loser is
+the other gets `409` (`DbUpdateConcurrencyException` -> `ConflictException`). Retrying the loser is
 safe: either it's now a no-op, or it applies against the fresh state.
 
 ---
@@ -290,7 +290,7 @@ flowchart TD
     commit{"COMMIT"}:::infra
     ok["Done: offset stored"]:::code
     pk["Unique violation on E<br/>(another instance won)"]:::bad
-    retry["Transient → retry"]:::code
+    retry["Transient -> retry"]:::code
 
     msg --> check
     check -- "yes" --> skip --> ok
@@ -335,7 +335,7 @@ The kitchen handles `PrepareOrderCommand` by calling the API twice: set `Prepari
 | Redelivery after… | What happens |
 |---|---|
 | Crash before anything | Runs normally |
-| `Preparing` set, crash before `Ready` | `Preparing` → no-op (`200`), then `Ready` is applied. Correct, with no duplicate event. |
+| `Preparing` set, crash before `Ready` | `Preparing` -> no-op (`200`), then `Ready` is applied. Correct, with no duplicate event. |
 | Transient failure (`409`, `5xx`, timeout) | Re-published with `x-retry-count + 1` and the **same `MessageId`** (the outbox row's `Id`), then the original is acked |
 | Shutting down mid-order | `nack(requeue: true)`: another worker picks it up and repeats the steps safely |
 
@@ -368,7 +368,7 @@ the pattern for real money.
 | **Lock TTL shorter than a slow request** | A request takes more than 30 s (database stall). The claim expires, a retry claims the key, and both run. | Keep `LockTtl` well above the request timeout, or refresh the lock while the request runs. The database-backed record above also closes this. |
 | **Redis has no persistent volume** in `docker-compose.yml` | Recreating the container loses every key, so retries within 24 h of that are treated as new. | Mount a volume and enable AOF (`--appendonly yes`), or use a managed Redis with persistence. |
 | **Redis down = no orders** | `TryClaimAsync` throws, so `POST /api/orders` returns `500` ("fail closed"). `/health/ready` reports Redis unhealthy. | Fail closed is the safe default for payments. Alternatives: the database-backed record, or a deliberate fail-open with a unique constraint as a backstop. |
-| **Late kitchen redelivery** | The kitchen sets `Ready`, then crashes before acking. On redelivery, `Ready → Preparing` isn't an allowed transition, so the API returns `422`. The kitchen treats that as permanent and the message is **dead-lettered**, even though the work was done. | Have the kitchen fetch the order first and skip steps it's already past, or treat "already at or past the target status" as success in the API client. |
+| **Late kitchen redelivery** | The kitchen sets `Ready`, then crashes before acking. On redelivery, `Ready -> Preparing` isn't an allowed transition, so the API returns `422`. The kitchen treats that as permanent and the message is **dead-lettered**, even though the work was done. | Have the kitchen fetch the order first and skip steps it's already past, or treat "already at or past the target status" as success in the API client. |
 | **Stats dedupe check is a read, then a write** | Covered by the primary key (4.3), at the cost of one extra retry on a race. | Fine as is. An `INSERT … ON CONFLICT DO NOTHING` first, checking the row count, would avoid the retry. |
 
 ---
@@ -377,9 +377,9 @@ the pattern for real money.
 
 | Test | What it proves |
 |---|---|
-| `IdempotencyEvaluatorTests` (unit) | New key → proceed. Completed + same body → replay. Processing → in progress. A different body → mismatch, in either state. |
+| `IdempotencyEvaluatorTests` (unit) | New key -> proceed. Completed + same body -> replay. Processing -> in progress. A different body -> mismatch, in either state. |
 | `OrdersApiTests.Same_idempotency_key_returns_the_original_response_and_creates_one_order` (integration) | The second POST returns the same order id with `Idempotent-Replayed: true`; one row in the database |
-| `OrdersApiTests.Concurrent_requests_with_the_same_key_create_exactly_one_order` | 5 simultaneous POSTs with one key → only `201`s and `409`s, exactly one order |
+| `OrdersApiTests.Concurrent_requests_with_the_same_key_create_exactly_one_order` | 5 simultaneous POSTs with one key -> only `201`s and `409`s, exactly one order |
 | `OrdersApiTests.Reusing_a_key_with_a_different_body_returns_422` | `errorCode: idempotency_key_reused` |
 | `OrdersApiTests.Missing_idempotency_key_returns_validation_problem` | The header is required |
 | `StatsProjectorTests.Duplicate_events_are_applied_only_once` | Applying the same event twice counts it once |

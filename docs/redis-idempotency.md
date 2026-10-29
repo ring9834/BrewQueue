@@ -61,7 +61,7 @@ flowchart LR
 | `RedisIdempotencyStore` | same | The Redis implementation of those three |
 | `IdempotencyEvaluator` | same | Turns "what's stored" + "this request" into a decision. No Redis in it, so it's unit-tested on its own. |
 | `IdempotencyOptions` | same | `LockTtl` (30 s), `ResponseTtl` (24 h) |
-| `IdempotencyFilter` + `[Idempotent]` | `src/BrewQueue.Api/CrossCutting/IdempotencyFilter.cs` | Runs around the action: claim → decide → run → complete or release |
+| `IdempotencyFilter` + `[Idempotent]` | `src/BrewQueue.Api/CrossCutting/IdempotencyFilter.cs` | Runs around the action: claim -> decide -> run -> complete or release |
 | `AddRedisIdempotency` | `src/BrewQueue.Infrastructure/DependencyInjection.cs` | Registers the connection and the store |
 | `RedisHealthCheck` | `src/BrewQueue.Api/CrossCutting/HealthChecks.cs` | `PING` as part of `/health/ready` |
 
@@ -397,6 +397,6 @@ are tested in milliseconds, and the Redis behaviour is tested against a real Red
 | Endpoint using it | `src/BrewQueue.Api/Controllers/OrdersController.cs` (`PlaceOrder`) |
 | Registration | `src/BrewQueue.Infrastructure/DependencyInjection.cs` (`AddRedisIdempotency`) |
 | Health check | `src/BrewQueue.Api/CrossCutting/HealthChecks.cs` (`RedisHealthCheck`) |
-| Settings | `src/BrewQueue.Api/appsettings.json` → `Idempotency`, `ConnectionStrings:Redis` |
+| Settings | `src/BrewQueue.Api/appsettings.json` -> `Idempotency`, `ConnectionStrings:Redis` |
 | Redis container | `docker-compose.yml` (`redis`) |
 | Client side of the key | `web/app/stores/cart.ts` |

@@ -107,7 +107,7 @@ is still reachable, a second instance can start before the first notices. Two wa
 | Situation | Action |
 |---|---|
 | Can't decode (not Confluent-framed Protobuf), tombstone, or fails validation | Send to `order-events.dlt` immediately |
-| Applying it throws | Retry in place: 3 attempts, 200 ms → 400 ms |
+| Applying it throws | Retry in place: 3 attempts, 200 ms -> 400 ms |
 | Still failing, **transient** (database down, timeout, concurrency conflict) | `RetryLater`: the consumer seeks back to the same offset and backs off from 1 s up to 30 s. It never dead-letters because of an outage. |
 | Still failing, **permanent** (a bug, a constraint violation) | Send to the DLT so it can't block the partition |
 | DLT itself unavailable | `RetryLater`: a message is never skipped without being parked first |
@@ -145,7 +145,7 @@ Alertmanager receiver at Slack, PagerDuty or email for real use (examples are in
 
 ### Runbook: replaying dead letters
 
-1. Look at the messages: Kafka UI → Topics → `order-events.dlt`. Read the `dlt-reason` and
+1. Look at the messages: Kafka UI -> Topics -> `order-events.dlt`. Read the `dlt-reason` and
    `dlt-error` headers.
 2. Fix the cause and deploy.
 3. Replay:

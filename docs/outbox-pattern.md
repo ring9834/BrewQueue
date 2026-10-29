@@ -9,7 +9,7 @@ messages from the API to Kafka and RabbitMQ reliably and in the right order:
 - what happens on every kind of failure
 - how to operate it
 
-Related: [messaging-workflow.md](messaging-workflow.md) (the full API → broker → consumer path),
+Related: [messaging-workflow.md](messaging-workflow.md) (the full API -> broker -> consumer path),
 [schema-registry.md](schema-registry.md), [kafka-production.md](kafka-production.md).
 
 ---
@@ -121,15 +121,15 @@ await db.SaveChangesAsync(ct);   // one transaction: order + both outbox rows
 
 | Operation | Business change | Outbox rows |
 |---|---|---|
-| `PlaceAsync` (POST /api/orders) | Insert `orders` + `order_lines` | `PrepareOrderCommand` → RabbitMQ, `OrderPlaced` → Kafka |
-| `ChangeStatusAsync` (PATCH /api/orders/{id}/status) | Update `orders.Status` | `OrderStatusChanged` → Kafka |
+| `PlaceAsync` (POST /api/orders) | Insert `orders` + `order_lines` | `PrepareOrderCommand` -> RabbitMQ, `OrderPlaced` -> Kafka |
+| `ChangeStatusAsync` (PATCH /api/orders/{id}/status) | Update `orders.Status` | `OrderStatusChanged` -> Kafka |
 | Status already as requested | Nothing | **None.** A repeated PATCH, such as a kitchen retry, doesn't produce duplicate events. |
 
 Points worth noticing:
 - Each event gets a fresh `EventId` **when the row is written**. If the row is published twice, both
   copies carry the same `EventId`, which is what lets consumers deduplicate (step 7).
 - A concurrent update of the same order fails on the `xmin` concurrency token
-  (`DbUpdateConcurrencyException` → 409). Its outbox row is rolled back with it, so no event is
+  (`DbUpdateConcurrencyException` -> 409). Its outbox row is rolled back with it, so no event is
   published for a change that didn't happen.
 
 ---
@@ -257,8 +257,8 @@ batch for order A:
 |---|---|---|---|
 | 41 | OrderPlaced (A) | acked | yes |
 | 42 | PrepareOrderCommand (A) | confirmed | yes |
-| 43 | OrderStatusChanged → Preparing (A) | **failed** (timeout) | no: `Attempts` + 1, `LastError` set |
-| 44 | OrderStatusChanged → Ready (A) | acked | **no**, because 43 before it failed |
+| 43 | OrderStatusChanged -> Preparing (A) | **failed** (timeout) | no: `Attempts` + 1, `LastError` set |
+| 44 | OrderStatusChanged -> Ready (A) | acked | **no**, because 43 before it failed |
 
 The next cycle starts again at 43, then re-sends 44. Kafka now holds 44 twice, and the stats
 worker skips the second copy because its `EventId` is already recorded. The duplicate is harmless.
@@ -364,7 +364,7 @@ SELECT pid, granted FROM pg_locks WHERE locktype = 'advisory';
 
 ## 11. Configuration
 
-`appsettings.json` → `Outbox` (`OutboxOptions`):
+`appsettings.json` -> `Outbox` (`OutboxOptions`):
 
 | Setting | Default | Effect |
 |---|---|---|
@@ -423,4 +423,4 @@ Integration tests live in `tests/BrewQueue.IntegrationTests/` and run against Te
 | RabbitMQ publishing (confirms) | `src/BrewQueue.Infrastructure/Messaging/RabbitMq.cs` |
 | Producer durability settings | `src/BrewQueue.Infrastructure/Messaging/Kafka.cs` (`DurableProducer`) |
 | Health check | `src/BrewQueue.Api/CrossCutting/HealthChecks.cs` (`OutboxHealthCheck`) |
-| Settings | `src/BrewQueue.Api/appsettings.json` → `Outbox` |
+| Settings | `src/BrewQueue.Api/appsettings.json` -> `Outbox` |

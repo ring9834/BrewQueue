@@ -83,14 +83,14 @@ flowchart LR
 flowchart TD
     d["Delivery from kitchen.orders"]:::code
     parse{"Valid JSON with<br/>an OrderId?"}:::infra
-    work["PATCH status → Preparing<br/>wait PrepareTime<br/>PATCH status → Ready"]:::code
+    work["PATCH status -> Preparing<br/>wait PrepareTime<br/>PATCH status -> Ready"]:::code
     ok["ack"]:::code
     kind{"What failed?"}:::infra
     retry{"x-retry-count < 3?"}:::infra
     repub["wait 1 s / 2 s / 4 s<br/>re-publish with x-retry-count + 1<br/>(same MessageId), then ack original"]:::code
     stop{"Shutting down?"}:::infra
     requeue["nack, requeue: true<br/>(back on the queue)"]:::code
-    dead["nack, requeue: false<br/>→ kitchen.orders.dlq"]:::bad
+    dead["nack, requeue: false<br/>-> kitchen.orders.dlq"]:::bad
 
     d --> parse
     parse -- "no: poison message" --> dead
@@ -154,7 +154,7 @@ crash loops the code can't catch.
 
 ### 2.5 Handling it
 
-1. Open `http://localhost:15672` → **Queues** → `kitchen.orders.dlq` → **Get messages** (choose
+1. Open `http://localhost:15672` -> **Queues** -> `kitchen.orders.dlq` -> **Get messages** (choose
    "Nack message requeue true" to look without removing).
 2. Read `x-death` and the `MessageId`, and find the error in Seq.
 3. Fix the cause. Then either:
@@ -162,7 +162,7 @@ crash loops the code can't catch.
      message**), setting `x-retry-count` to `0`, or
    - move the whole queue with the Shovel plugin (`rabbitmq-plugins enable rabbitmq_shovel
      rabbitmq_shovel_management`, then **Move messages** on the queue page).
-4. Or, if the order shouldn't be prepared, cancel it (`PATCH /api/orders/{id}/status` → `Cancelled`)
+4. Or, if the order shouldn't be prepared, cancel it (`PATCH /api/orders/{id}/status` -> `Cancelled`)
    and purge the message.
 
 Re-processing is safe because the kitchen's steps are idempotent: setting a status the order
@@ -199,11 +199,11 @@ flowchart TD
     m["Message from order-events"]:::code
     dec{"Decodes and passes<br/>validation?"}:::infra
     apply["Apply to stats<br/>(fresh DbContext per attempt)"]:::code
-    done["Completed → store offset"]:::code
+    done["Completed -> store offset"]:::code
     att{"Attempt < 3?"}:::infra
     wait["Wait 200 ms, 400 ms…<br/>retry in place"]:::code
     tr{"FailureClassifier:<br/>transient?"}:::infra
-    later["RetryLater → seek back,<br/>back off 1 s … 30 s"]:::code
+    later["RetryLater -> seek back,<br/>back off 1 s … 30 s"]:::code
     dlt["Copy to order-events.dlt<br/>(wait for broker ack)"]:::bad
     dltok{"DLT write<br/>succeeded?"}:::infra
 
@@ -273,7 +273,7 @@ and it carries its original `EventId`, so deduplication still works.
 ```
 
 Any new message on the DLT within 10 minutes fires a warning through Alertmanager. The DLT should
-normally be **empty**, so a single message is worth a look. The data comes from kafka-exporter →
+normally be **empty**, so a single message is worth a look. The data comes from kafka-exporter ->
 Prometheus, and the rule is covered by `infra/monitoring/alerts.test.yml` (`promtool test rules`).
 
 ### 3.5 Replaying
@@ -281,7 +281,7 @@ Prometheus, and the rule is covered by `infra/monitoring/alerts.test.yml` (`prom
 The runbook is in [kafka-production.md](kafka-production.md) ("Runbook: replaying dead letters"):
 
 ```bash
-# 1. Look: Kafka UI (http://localhost:8081) → Topics → order-events.dlt → Messages → headers
+# 1. Look: Kafka UI (http://localhost:8081) -> Topics -> order-events.dlt -> Messages -> headers
 # 2. Fix the cause and deploy
 # 3. Replay
 pip install confluent-kafka
@@ -351,7 +351,7 @@ sequenceDiagram
     W->>D: copy + dlt-* headers (acks=all)
     D-->>W: ack
     W->>W: store offset 18234, carry on with p4
-    P->>P: DLT offset increased → OrderEventsDeadLettered
+    P->>P: DLT offset increased -> OrderEventsDeadLettered
     P-->>O: alert
     O->>D: inspect in Kafka UI (dlt-error)
     O->>O: fix bug, deploy
@@ -369,7 +369,7 @@ sequenceDiagram
 | **No alert on `kitchen.orders.dlq`** | A dead-lettered `PrepareOrderCommand` leaves its order stuck at `Received`, and nobody is told. The customer just waits. | Enable RabbitMQ's Prometheus plugin (`rabbitmq_prometheus`, port 15692), scrape it, and alert on `rabbitmq_queue_messages_ready{queue="kitchen.orders.dlq"} > 0`. |
 | **No replay tool for RabbitMQ** | Replays are manual, one message at a time in the UI. | A small script like `replay_dlt.py` that moves messages back with `x-retry-count` reset, or the Shovel plugin. |
 | **RabbitMQ's dead-lettering from quorum queues is at-most-once by default** | If the DLQ can't accept a message at that moment, it can be dropped. | Declare `kitchen.orders` with `x-dead-letter-strategy: at-least-once` and `x-overflow: reject-publish` (and make the DLQ a quorum queue too). Changing queue arguments means deleting and recreating the queue. |
-| **Late kitchen redelivery is wrongly dead-lettered** | If the kitchen crashes after setting `Ready` but before acking, the redelivery fails with `Ready → Preparing` (`422`) and goes to the DLQ, even though the work was done. | Skip steps the order is already past (see [idempotency.md](idempotency.md), step 6). |
+| **Late kitchen redelivery is wrongly dead-lettered** | If the kitchen crashes after setting `Ready` but before acking, the redelivery fails with `Ready -> Preparing` (`422`) and goes to the DLQ, even though the work was done. | Skip steps the order is already past (see [idempotency.md](idempotency.md), step 6). |
 | **The DLT can't be emptied message by message** | After a replay, the replayed copies stay in the DLT until retention expires, and could be replayed again by mistake. | Harmless thanks to `EventId` deduplication. For tidiness, record the last replayed offset, or use `kafka-delete-records.sh` up to an offset. |
 | **Kitchen backoff holds a prefetch slot** | While a worker waits 1–4 s before re-publishing, that message occupies one of its 5 prefetch slots. | Fine at this scale. At high volume, use delayed retry queues (a TTL queue that dead-letters back to the work queue) instead of `Task.Delay`. |
 

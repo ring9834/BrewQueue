@@ -1,4 +1,4 @@
-# Messaging workflow: API → outbox → producers → consumers
+# Messaging workflow: API -> outbox -> producers -> consumers
 
 This document follows one order through BrewQueue's messaging: from the HTTP request, through the
 transactional outbox, to the Kafka and RabbitMQ producers, and on to the two consumers. It explains
@@ -25,15 +25,15 @@ flowchart TD
     rprod["RabbitMQ publisher<br/>publisher confirms<br/>waits for earlier Kafka acks"]:::code
     topic["Kafka order-events<br/>key = orderId · 6 partitions"]:::infra
     queue["RabbitMQ kitchen.orders<br/>quorum queue + DLX"]:::infra
-    stats["Stats worker<br/>applied → store offset<br/>outage → seek back · bad → DLT"]:::code
-    kitchen["Kitchen worker<br/>Preparing → Ready<br/>PATCH status via the API"]:::code
+    stats["Stats worker<br/>applied -> store offset<br/>outage -> seek back · bad -> DLT"]:::code
+    kitchen["Kitchen worker<br/>Preparing -> Ready<br/>PATCH status via the API"]:::code
 
     client --> svc --> tx
     outbox --> pub
     pub --> kprod --> topic --> stats
     pub --> rprod --> queue --> kitchen
-    kprod -. "broker ack → ProcessedAt set" .-> outbox
-    rprod -. "broker ack → ProcessedAt set" .-> outbox
+    kprod -. "broker ack -> ProcessedAt set" .-> outbox
+    rprod -. "broker ack -> ProcessedAt set" .-> outbox
     kitchen -. "status change = new outbox event" .-> svc
 
     style tx fill:#FFFBF2,stroke:#B7791F,stroke-dasharray:5 4,color:#5C3D0E
@@ -108,7 +108,7 @@ duplicates, which consumers handle (step 5), but it never sends one order's even
 | | Kafka `order-events` | RabbitMQ `kitchen.orders` |
 |---|---|---|
 | Model | Event log: facts, kept for 14 days, replayable | Work queue: jobs, deleted once acknowledged |
-| Ordering | Per order (key → partition) | No global ordering across workers |
+| Ordering | Per order (key -> partition) | No global ordering across workers |
 | Durability | Replication factor 3, `min.insync.replicas=2` | Durable quorum queue, persistent messages |
 | Failures | Consumer sends to `order-events.dlt` | Rejected messages are dead-lettered to `kitchen.orders.dlq` |
 
@@ -124,12 +124,12 @@ consumers make a duplicate harmless.
 | Event applied | Counts updated and event id recorded in `processed_events`, in one transaction; then the offset is stored and committed in the background |
 | Duplicate event id | Skipped (`processed_events` already has it) |
 | Undecodable, empty or invalid message | Copied to `order-events.dlt` with `dlt-*` diagnostic headers, then the offset moves on |
-| Failure that looks temporary (database down, timeout, concurrency conflict) | 3 quick retries; then the worker rewinds to the same offset and backs off (1 s → 30 s). It never dead-letters because of an outage. |
+| Failure that looks temporary (database down, timeout, concurrency conflict) | 3 quick retries; then the worker rewinds to the same offset and backs off (1 s -> 30 s). It never dead-letters because of an outage. |
 | Failure that looks permanent (a bug, a constraint violation) | 3 retries, then the DLT |
 
 **Kitchen worker** (RabbitMQ, competing consumers):
 1. Receives `PrepareOrderCommand`.
-2. Calls `PATCH /api/orders/{id}/status` → `Preparing`, waits (simulated preparation), then → `Ready`.
+2. Calls `PATCH /api/orders/{id}/status` -> `Preparing`, waits (simulated preparation), then -> `Ready`.
 3. Acknowledges the message.
 4. On failure:
    - temporary errors are re-published after a backoff with an incremented `x-retry-count` header (up to 3 retries)
@@ -144,7 +144,7 @@ change runs through `OrderService.ChangeStatusAsync`, which updates the order an
 `OrderStatusChanged` outbox row in one transaction, just like step 1. So:
 
 ```
-PrepareOrderCommand (RabbitMQ) → kitchen → PATCH status → outbox → OrderStatusChanged (Kafka) → stats
+PrepareOrderCommand (RabbitMQ) -> kitchen -> PATCH status -> outbox -> OrderStatusChanged (Kafka) -> stats
 ```
 
 Business rules (allowed status transitions, optimistic concurrency) and event publishing stay in
