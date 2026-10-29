@@ -9,7 +9,7 @@ A small café ordering system built to practise a modern full stack: customers o
 | Idempotency | Redis (`Idempotency-Key` header on `POST /api/orders`) |
 | Messaging | Transactional outbox → **RabbitMQ** (kitchen work queue, retries, DLQ) and **Kafka** (order event stream). See [Messaging workflow](docs/messaging-workflow.md) and [Messaging Contract Management](docs/schema-registry.md)|
 | Kafka in production shape | 3 brokers (RF 3, `min.insync.replicas=2`), TLS + SASL/SCRAM + ACLs, Schema Registry (Protobuf, `BACKWARD_TRANSITIVE`), dead-letter topic, Prometheus lag/DLT alerts. See [docs/kafka-production.md](docs/kafka-production.md) |
-| Workers | Kitchen worker (RabbitMQ consumer), Stats worker (Kafka consumer → read model)|
+| Workers | Kitchen worker (RabbitMQ consumer), Stats worker (Kafka consumer -> read model)|
 | Frontend | Nuxt 4, Vue 3, TypeScript, **Pinia** (client state), **Nuxt Query / TanStack Vue Query** (server state) |
 | Tests | xUnit unit tests; integration tests with **Testcontainers** (Postgres, Redis, RabbitMQ, Kafka, Schema Registry); `promtool` tests for the alert rules |
 | Local deployment | Docker Compose |
@@ -90,8 +90,8 @@ promtool test rules infra/monitoring/alerts.test.yml   # alert rules (promtool s
 - The barista board (`pages/barista.vue`) moves cards **optimistically** and rolls back on failure.
 
 ### 2. Idempotency with Redis
-- `[Idempotent]` on `OrdersController.PlaceOrder` → `CrossCutting/IdempotencyFilter.cs`.
-- Redis `SET NX` claims the key atomically. Outcomes: first request → proceed; same key + same body → stored response replayed with `Idempotent-Replayed: true`; still running → 409; same key + different body → 422.
+- `[Idempotent]` on `OrdersController.PlaceOrder` -> `CrossCutting/IdempotencyFilter.cs`.
+- Redis `SET NX` claims the key atomically. Outcomes: first request -> proceed; same key + same body -> stored response replayed with `Idempotent-Replayed: true`; still running -> 409; same key + different body -> 422.
 - The cart store (`stores/cart.ts`) keeps one key per checkout attempt, so retrying after a network error can't create a second order.
 - Pure decision logic (`IdempotencyEvaluator`) is unit tested; the full behaviour (including 5 concurrent requests) is integration tested.
 
@@ -116,7 +116,7 @@ promtool test rules infra/monitoring/alerts.test.yml   # alert rules (promtool s
 - Full details, runbooks (schema changes, replaying dead letters, password rotation) and the remaining gaps: **[docs/kafka-production.md](docs/kafka-production.md)**.
 
 ### 6. Errors, logs, OpenAPI
-- Every error is `application/problem+json` with `traceId`, `correlationId` and a machine-readable `errorCode` (`CrossCutting/ErrorHandling.cs`). Domain rule violations → 422, not found → 404, concurrency → 409, validation → 400 with field errors, unexpected → 500 with details hidden outside Development.
+- Every error is `application/problem+json` with `traceId`, `correlationId` and a machine-readable `errorCode` (`CrossCutting/ErrorHandling.cs`). Domain rule violations -> 422, not found -> 404, concurrency -> 409, validation → 400 with field errors, unexpected -> 500 with details hidden outside Development.
 - Optimistic concurrency uses PostgreSQL's `xmin` (`Order.Version`).
 - `X-Correlation-Id` is accepted or generated per request, stored on outbox rows, sent as a broker header and logged by both workers. In Seq, filter by `CorrelationId = '…'` to follow one order across all three services.
 - OpenAPI comes from the built-in `Microsoft.AspNetCore.OpenApi` generator, enriched by XML doc comments and `[ProducesResponseType]`. With the API running, `cd web && npm run gen:api` generates TypeScript types from it.
