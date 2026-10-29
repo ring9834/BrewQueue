@@ -4,7 +4,7 @@ This document explains what Schema Registry does in BrewQueue, how a schema move
 file to the bytes on the `order-events` topic, and how a change to the event contract is checked
 before it can break a consumer.
 
-Related: [messaging-workflow.md](messaging-workflow.md) (the whole outbox → Kafka → consumer path)
+Related: [messaging-workflow.md](messaging-workflow.md) (the whole outbox -> Kafka -> consumer path)
 and [kafka-production.md](kafka-production.md) (cluster, security, runbooks).
 
 ---
@@ -34,7 +34,7 @@ decodes them without contacting the registry.
 ```mermaid
 flowchart TD
     proto["order_event.proto<br/>single source of truth"]:::file
-    build["dotnet build<br/>Grpc.Tools → C# classes"]:::code
+    build["dotnet build<br/>Grpc.Tools -> C# classes"]:::code
     init["schema-init<br/>register_schemas.py<br/>check, then register"]:::code
     ci["CI / developer<br/>register_schemas.py --check-only"]:::code
     sr["Schema Registry<br/>HTTPS + Basic auth<br/>BACKWARD_TRANSITIVE"]:::infra
@@ -88,7 +88,7 @@ sequenceDiagram
         SR-->>I: [1, 2, ...]
         I->>SR: POST /compatibility/subjects/order-events-value/versions/latest
         SR-->>I: is_compatible true / false
-        Note over I: false → print the reasons, exit 2,<br/>apps don't start
+        Note over I: false -> print the reasons, exit 2,<br/>apps don't start
     else first time
         SR-->>I: 404
     end
@@ -185,7 +185,7 @@ several versions.
 | Add a new field (new number) | Accepted | Old data simply lacks it; readers see the default |
 | Rename a field (same number and type) | Accepted | Protobuf puts numbers on the wire, not names |
 | Remove a field | Accepted, but `reserved` its number and name | Readers ignore it; reusing the number later would be dangerous |
-| Change a field's type (e.g. `int64` → `string`) | **Rejected** | Old bytes can't be read as the new type |
+| Change a field's type (e.g. `int64` -> `string`) | **Rejected** | Old bytes can't be read as the new type |
 | Reuse a removed field's number for a different type | **Rejected** | Old data would be misread |
 | Move `OrderEvent` from first place in the file | Don't | The serializer identifies the message type by its position |
 
@@ -224,7 +224,7 @@ The contract (`src/BrewQueue.Contracts/Protos/order_event.proto`):
 |---|---|
 | Clients (API, Kafka UI, schema-init) | HTTPS with our CA (`infra/kafka/secrets/public/ca.crt`) and HTTP Basic auth |
 | Users | `admin` (used by schema-init and CI), `api`, `kafka-ui`. The stats worker has no user: it never calls the registry. |
-| Registry → Kafka | SCRAM user `schema-registry`, allowed only on `_schemas` and its own groups |
+| Registry -> Kafka | SCRAM user `schema-registry`, allowed only on `_schemas` and its own groups |
 
 **Limitation:** open-source Schema Registry authenticates users but can't restrict *what* each one
 may do. Any authenticated user could register a schema. Here that's contained by configuration:
