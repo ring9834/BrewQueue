@@ -91,7 +91,7 @@ public sealed class OrderEventsConsumer(
                     continue;
                 }
 
-                if (result?.Message is null) continue;
+                if (result?.Message is null) continue; // tombstone or empty message, ignore
 
                 var outcome = await processor.ProcessAsync(result, ct);
                 if (outcome == ProcessingOutcome.Completed)

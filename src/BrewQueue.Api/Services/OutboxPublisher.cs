@@ -99,7 +99,7 @@ public sealed class OutboxPublisher(
                     ? TimeSpan.FromTicks(Math.Min(delay.Ticks * 2, _options.MaxBackoff.Ticks))
                     : _options.PollInterval;
 
-                if (clock.GetUtcNow() >= nextCleanup)
+                if (clock.GetUtcNow() >= nextCleanup) // periodically delete old published rows so the table doesn't grow forever
                 {
                     await CleanupAsync(stoppingToken);
                     nextCleanup = clock.GetUtcNow() + CleanupInterval;
@@ -129,6 +129,18 @@ public sealed class OutboxPublisher(
         var hasLock = await db.Database
             .SqlQuery<bool>($"SELECT pg_try_advisory_xact_lock({PublisherLockKey}) AS \"Value\"")
             .SingleAsync(ct);
+        //// This is the equivalent for SQL Server, but we use PostgreSQL for the advisory lock because it works across multiple databases on the same server.
+        // var result = new SqlParameter("@result", SqlDbType.Int) { Direction = ParameterDirection.Output };
+        // await db.Database.ExecuteSqlRawAsync(
+        //     """
+        //     EXEC @result = sp_getapplock
+        //         @Resource = N'BrewQueue.OutboxPublisher',
+        //         @LockMode = 'Exclusive',
+        //         @LockOwner = 'Transaction',
+        //         @LockTimeout = 0;
+        //     """,
+        //     [result], ct);
+        // var hasLock = (int)result.Value >= 0;
         if (!hasLock)
             return new BatchResult(HadLock: false, Published: 0, Failed: false); // another instance is publishing
 

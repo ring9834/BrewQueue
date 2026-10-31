@@ -44,9 +44,9 @@ public sealed class KafkaOptions
     /// </summary>
     public bool ManageTopics { get; set; }
 
-    public int OrderEventsPartitions { get; set; } = 6;
-    public short ReplicationFactor { get; set; } = 3;
-    public int MinInSyncReplicas { get; set; } = 2;
+    public int OrderEventsPartitions { get; set; } = 6; // one per partition of the order-events topic, so each StatsWorker instance can handle one partition
+    public short ReplicationFactor { get; set; } = 3; // the secured cluster has 3 brokers, so 3 replicas is the max and gives full redundancy
+    public int MinInSyncReplicas { get; set; } = 2; // a write is confirmed only once at least 2 brokers have it, so we can lose one broker without losing data
 }
 
 public sealed class SchemaRegistryOptions
@@ -75,6 +75,11 @@ public sealed class SchemaRegistryOptions
     }
 }
 
+/// <summary>
+/// Applies connection and security settings to any Kafka client config, and provides topic management.
+/// <para>All clients in the solution must use the same settings, so they can talk to the same brokers and schema registry.</para>
+/// <para>All producers must use the same <c>min.insync.replicas</c> and <c>acks=all</c> so a write is confirmed only once at least two brokers have it, and the idempotent producer so broker-side retries can't duplicate or reorder messages within a partition.</para>
+/// </summary>
 public static class KafkaClientConfig
 {
     /// <summary>Applies connection and security settings to any producer/consumer/admin config.</summary>

@@ -56,7 +56,7 @@ public sealed class IdempotencyFilter(
 
         switch (decision.Kind)
         {
-            case IdempotencyDecisionKind.Replay:
+            case IdempotencyDecisionKind.Replay: // Replay the stored response instead of executing the action again.
                 logger.LogInformation("Replaying stored response for idempotency key {IdempotencyKey}", key);
                 var record = decision.Existing!;
                 http.Response.Headers[ReplayedHeader] = "true";
@@ -69,14 +69,14 @@ public sealed class IdempotencyFilter(
                 };
                 return;
 
-            case IdempotencyDecisionKind.InProgress:
+            case IdempotencyDecisionKind.InProgress: // Another request is still processing this key: 409 Conflict.
                 http.Response.Headers.RetryAfter = "1";
                 context.Result = Problem(http, StatusCodes.Status409Conflict, "Request already in progress",
                     "A request with this Idempotency-Key is still being processed. Retry shortly.",
                     "idempotency_in_progress");
                 return;
 
-            case IdempotencyDecisionKind.PayloadMismatch:
+            case IdempotencyDecisionKind.PayloadMismatch: // Same key was used with a different payload: 422 Unprocessable Entity.
                 context.Result = Problem(http, StatusCodes.Status422UnprocessableEntity, "Idempotency-Key reused",
                     "This Idempotency-Key was already used with a different request body.",
                     "idempotency_key_reused");

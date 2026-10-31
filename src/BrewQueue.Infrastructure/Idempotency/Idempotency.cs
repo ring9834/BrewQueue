@@ -96,13 +96,13 @@ public sealed class RedisIdempotencyStore(IConnectionMultiplexer redis, Microsof
         var claimed = await db.StringSetAsync(
             Key(key), JsonSerializer.Serialize(processing, Json), _options.LockTtl, When.NotExists);
 
-        if (claimed) return null;
+        if (claimed) return null; // We claimed it, so the caller can proceed; null means "no existing record" originally so we can proceed.
 
         var existing = await db.StringGetAsync(Key(key));
         // The key may have expired between the two calls; treat it as in progress to be safe.
-        return existing.HasValue
+        return existing.HasValue // If the key exists, deserialize it; otherwise, return the processing record.
             ? JsonSerializer.Deserialize<IdempotencyRecord>(existing.ToString(), Json)
-            : processing;
+            : processing; // processing means "in progress" to the caller, so they will get a 409.
     }
 
     public Task CompleteAsync(string key, IdempotencyRecord record, CancellationToken ct) =>
